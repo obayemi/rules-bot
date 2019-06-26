@@ -6,8 +6,10 @@ Mainly supposed to give users access to protected channels if they accept a
 rules message.
 
 ## To run:
-> go get github.com/obayemi/discord-rules
-> rules -t <discord token> -d <path to sqlite db>
+```
+go get github.com/obayemi/rules-bot
+rules -t <discord token> -d <path to sqlite db>
+```
 
 If no db file is given, will run with in-memory non-persistent DB
 

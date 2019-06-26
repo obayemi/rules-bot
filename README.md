@@ -38,3 +38,4 @@ only guild owner or member of the admin group are allowed to run commands (TODO)
 - improve commands interface
 - command to start the bot by force tracking a message not initially sent by the bot
 - unit tests
+- dockerfile for even easier/secure deployment ?

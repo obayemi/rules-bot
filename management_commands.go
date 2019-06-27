@@ -9,6 +9,15 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+func botTriggered(botID string, m *discordgo.Message) bool {
+	for _, user := range m.Mentions {
+		if user.ID == botID {
+			return true
+		}
+	}
+	return false
+}
+
 /*
  * configure the bot (rules, channels for rules and logs, change reactions, etc...
  */
@@ -130,8 +139,8 @@ func showStatus(server Server, s *discordgo.Session, m *discordgo.Message) {
 	s.ChannelMessageSend(
 		m.ChannelID,
 		fmt.Sprintf(
-			"server ID: %s\nRules Channel: <#%s>\nLog Channel: <#%s>\nEmotes: %s / %s\nActive: %t\nRules:\n```markdown\n%s\n```\n",
-			server.GuildID, server.RulesChannel, server.LogChannelID, server.ReactionOk, server.ReactionNo, server.Active, server.Rules,
+			"server ID: %s\nRules Channel: <#%s>\nAccepted Role: %s\nLog Channel: <#%s>\nEmotes: %s / %s\nActive: %t\nRules:\n```markdown\n%s\n```\n",
+			server.GuildID, server.RulesChannel, server.Role, server.LogChannelID, server.ReactionOk, server.ReactionNo, server.Active, server.Rules,
 		),
 	)
 }
@@ -144,6 +153,14 @@ func showHelp(s *discordgo.Session, channelID string) {
 
 func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID || !botTriggered(s.State.User.ID, m.Message) {
+		return
+	}
+	guild, err := s.Guild(m.GuildID)
+	if err != nil {
+		log.Printf("command on invalid server %s: %s", m.GuildID, m.Content)
+		return
+	}
+	if m.Author.ID != guild.OwnerID {
 		return
 	}
 

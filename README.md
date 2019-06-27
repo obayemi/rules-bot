@@ -31,9 +31,9 @@ only guild owner or member of the admin group are allowed to run commands (TODO)
 - `status`: show configuration
 
 ## TODO
-- actualy detect that the ok/nok reactions were sent and give appropriate role
+- give or take appropriate role / kick on interraction with rules
 - auto update rules if enabled
-- roles management: set-role, set-admin-role
+- roles management: `set-role`, `set-admin-role`
 - read reactions at initialization to allow people in that accepted the rules when the bot was offline
 - improve commands interface
 - command to start the bot by force tracking a message not initially sent by the bot

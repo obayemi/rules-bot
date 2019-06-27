@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -24,6 +25,7 @@ type Server struct {
 	ReactionOk     string `gorm:"default:'\u2705'"`
 	ReactionNo     string `gorm:"default:'\u274C'"`
 	Active         bool
+	Strict         bool
 }
 
 var (
@@ -40,6 +42,32 @@ func init() {
 	flag.StringVar(&db_connection, "db", ":memory:", "db connection info")
 }
 
+func logInterraction(s *discordgo.Session, m *discordgo.MessageReaction, server *Server, action string, event string) {
+	log.Printf("%s: %s", m.UserID, action)
+	if server.LogChannelID == "" {
+		return
+	}
+	s.ChannelMessageSendEmbed(
+		server.LogChannelID,
+		&discordgo.MessageEmbed{
+			Title:       action,
+			Description: fmt.Sprintf("<@%s>: %s", m.UserID, event),
+		},
+	)
+}
+
+func handleReactionOk(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
+	logInterraction(s, m, server, "add-role", "accepted the rules")
+}
+
+func handleReactionKo(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
+	logInterraction(s, m, server, "kick", "rejected the rules")
+}
+
+func handleRemoveOk(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
+	logInterraction(s, m, server, "remove-role", "un-accepted the rules")
+}
+
 func ReactionHandler(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
 	server := Server{}
 	result := db.Where(Server{GuildID: m.GuildID}).FirstOrInit(&server)
@@ -51,8 +79,12 @@ func ReactionHandler(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
 		return
 	}
 
-	log.Println(m.Emoji)
-	log.Printf("REACTION %s: %s %s\n", m.UserID, m.Emoji.Name, m.Emoji.ID)
+	if m.Emoji.Name == server.ReactionOk {
+		handleReactionOk(s, m.MessageReaction, &server)
+	}
+	if m.Emoji.Name == server.ReactionNo {
+		handleReactionKo(s, m.MessageReaction, &server)
+	}
 }
 
 func main() {

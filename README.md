@@ -39,3 +39,4 @@ only guild owner or member of the admin group are allowed to run commands (TODO)
 - command to start the bot by force tracking a message not initially sent by the bot
 - unit tests
 - dockerfile for even easier/secure deployment ?
+- strict mode, to not enforce every user to leave a like on the rules comment. (like the recheck at initialisation)

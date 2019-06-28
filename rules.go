@@ -58,7 +58,8 @@ func main() {
 		log.Fatalf("error fetching user information, %s\n", err)
 	}
 	DiscordSession.AddHandler(MessageHandler)
-	DiscordSession.AddHandler(ReactionHandler)
+	DiscordSession.AddHandler(ReactionAddHandler)
+	DiscordSession.AddHandler(ReactionRemoveHandler)
 	if err := DiscordSession.Open(); err != nil {
 		log.Fatalf("error opening connection to Discord, %s\n", err)
 	}

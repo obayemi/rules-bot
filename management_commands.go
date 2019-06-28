@@ -53,7 +53,9 @@ func setLogsChannel(server *Server, s *discordgo.Session, m *discordgo.Message, 
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("malformed channel %s", channel))
 	}
 	channelID := string(results[1])
-	if channelID != "" {
+	if channelID == "" {
+		s.ChannelMessageSend(m.ChannelID, "stopping logging user interractions")
+	} else {
 		s.ChannelMessageSend(channelID, "initialized logs")
 	}
 	server.LogChannelID = channelID
@@ -76,7 +78,11 @@ func setRole(server *Server, s *discordgo.Session, m *discordgo.Message, role st
 	}
 	roleID := string(results[1])
 	server.Role = roleID
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("rules bot gives role %s", server.Role))
+	if server.Role == "" {
+		s.ChannelMessageSend(m.ChannelID, "cleared allowed user role")
+	} else {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("rules bot gives role %s", server.Role))
+	}
 	db.Save(&server)
 }
 
@@ -89,7 +95,11 @@ func setAdminRole(server *Server, s *discordgo.Session, m *discordgo.Message, ro
 	}
 	roleID := string(results[1])
 	server.AdminRole = roleID
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("new admin role: %s", server.AdminRole))
+	if server.Role == "" {
+		s.ChannelMessageSend(m.ChannelID, "cleared admin user role")
+	} else {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("new admin role: %s", server.AdminRole))
+	}
 	db.Save(&server)
 }
 
@@ -177,6 +187,24 @@ func showHelp(s *discordgo.Session, channelID string) {
 	)
 }
 
+func authorizedUser(s *discordgo.Session, guild *discordgo.Guild, authorID string, server *Server) bool {
+	if authorID == guild.OwnerID {
+		return true
+	}
+	member, err := s.GuildMember(guild.ID, authorID)
+	if err != nil {
+		log.Println("request by invalid user")
+		return false
+	}
+	for _, role := range member.Roles {
+		log.Println(role)
+		if role == server.AdminRole {
+			return true
+		}
+	}
+	return false
+}
+
 func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID || !botTriggered(s.State.User.ID, m.Message) {
 		return
@@ -186,7 +214,11 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		log.Printf("command on invalid server %s: %s", m.GuildID, m.Content)
 		return
 	}
-	if m.Author.ID != guild.OwnerID {
+	server := Server{}
+	result := db.Where(Server{GuildID: m.GuildID}).FirstOrInit(&server)
+
+	if !authorizedUser(s, guild, m.Author.ID, &server) {
+		// TODO: check ig author is part of admin role
 		return
 	}
 
@@ -198,9 +230,9 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	log.Printf("%s: %s\n", m.Author.ID, m.Content)
 
-	server := Server{}
-	result := db.Where(Server{GuildID: m.GuildID}).FirstOrInit(&server)
-	// result.RecordNotFound() if going back to `First` only instead of FirstOrInit
+	/*
+	   result.RecordNotFound() is not useful now, but I keep it in place to ease the eventual migration from `FirstOrInit` to `First`
+	*/
 	if result.RecordNotFound() || db.NewRecord(server) {
 		log.Printf("command on unregistered server %s: %s", m.GuildID, m.Content)
 	} else if result.Error != nil {
@@ -209,7 +241,7 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 	fields := strings.Fields(m.Content)
 
-	// no point to continue if there's no fields
+	// no point to continue if there's no command. Help maybe?
 	if len(fields) <= 1 {
 		return
 	}
@@ -219,8 +251,14 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	case "set-rules":
 		setRulesContent(&server, s, m.Message)
 	case "set-rules-channel":
+		if len(fields) != 3 {
+			return
+		}
 		setRulesChannel(&server, s, m.Message, fields[2])
 	case "set-logs-channel":
+		if len(fields) != 3 {
+			return
+		}
 		setLogsChannel(&server, s, m.Message, fields[2])
 	case "set-reactions":
 		if len(fields) != 4 {
@@ -229,10 +267,19 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		setReactions(&server, s, m.Message, fields[2], fields[3])
 	case "set-role":
+		if len(fields) != 3 {
+			return
+		}
 		setRole(&server, s, m.Message, fields[2])
 	case "set-admin-role":
+		if len(fields) != 3 {
+			return
+		}
 		setAdminRole(&server, s, m.Message, fields[2])
-	case "set-message":
+	case "set-message-id":
+		if len(fields) != 3 {
+			return
+		}
 		setRuleMessageID(&server, s, m.Message, fields[2])
 
 	case "disable":

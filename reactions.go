@@ -13,6 +13,9 @@ func logInterraction(s *discordgo.Session, m *discordgo.MessageReaction, server 
 	if server.LogChannelID == "" {
 		return
 	}
+	if server.Debug {
+		action += "(DEBUG)"
+	}
 	s.ChannelMessageSendEmbed(
 		server.LogChannelID,
 		&discordgo.MessageEmbed{
@@ -22,50 +25,35 @@ func logInterraction(s *discordgo.Session, m *discordgo.MessageReaction, server 
 	)
 }
 
-func giveRole(
-	s *discordgo.Session,
-	guild *discordgo.Guild,
-	user *discordgo.User,
-	role *discordgo.Role,
-) {
-}
-func takeRole(
-	s *discordgo.Session,
-	guild *discordgo.Guild,
-	user *discordgo.User,
-	role *discordgo.Role,
-) {
-}
-func kick(
-	s *discordgo.Session,
-	guild *discordgo.Guild,
-	user *discordgo.User,
-) {
-}
-
 func handleReactionOk(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
-	if err := s.GuildMemberRoleAdd(m.GuildID, m.UserID, server.Role); err != nil {
-		log.Println(err)
-		logInterraction(s, m, server, "add-role", "error settig the role")
-		return
+	if !server.Debug {
+		if err := s.GuildMemberRoleAdd(m.GuildID, m.UserID, server.Role); err != nil {
+			log.Println(err)
+			logInterraction(s, m, server, "add-role", "error settig the role")
+			return
+		}
 	}
 	logInterraction(s, m, server, "add-role", "accepted the rules")
 }
 
 func handleReactionKo(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
-	if err := s.GuildMemberDeleteWithReason(m.GuildID, m.UserID, "rejected the server rules"); err != nil {
-		log.Println(err)
-		logInterraction(s, m, server, "kick", "error kicking user")
-		return
+	if !server.Debug {
+		if err := s.GuildMemberDeleteWithReason(m.GuildID, m.UserID, "rejected the server rules"); err != nil {
+			log.Println(err)
+			logInterraction(s, m, server, "kick", "error kicking user")
+			return
+		}
 	}
 	logInterraction(s, m, server, "kick", "rejected the rules")
 }
 
 func handleReactionRemoveOk(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
-	if err := s.GuildMemberRoleRemove(m.GuildID, m.UserID, server.Role); err != nil {
-		log.Println(err)
-		logInterraction(s, m, server, "remove-role", "error kicking user")
-		return
+	if !server.Debug {
+		if err := s.GuildMemberRoleRemove(m.GuildID, m.UserID, server.Role); err != nil {
+			log.Println(err)
+			logInterraction(s, m, server, "remove-role", "error removing user permission")
+			return
+		}
 	}
 	logInterraction(s, m, server, "remove-role", "un-accepted the rules")
 }

@@ -24,6 +24,7 @@ type Server struct {
 	ReactionOk     string `gorm:"default:'\u2705'"`
 	ReactionNo     string `gorm:"default:'\u274C'"`
 	Active         bool
+	Debug          bool
 	Strict         bool
 }
 

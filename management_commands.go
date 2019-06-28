@@ -66,14 +66,14 @@ func setReactions(server *Server, s *discordgo.Session, m *discordgo.Message, re
 }
 
 func setRole(server *Server, s *discordgo.Session, m *discordgo.Message, role string) {
-	re := regexp.MustCompile("<#(.+)>")
+	re := regexp.MustCompile("<@&(.+)>")
 	results := re.FindSubmatch([]byte(role))
 	if len(results) != 2 {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("malformed channel %s", role))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("malformed role %s", role))
 	}
 	roleID := string(results[1])
 	server.Role = roleID
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("rules in channel <#%s>", server.RulesChannel))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("rules bot gives role %s", server.Role))
 	db.Save(&server)
 }
 

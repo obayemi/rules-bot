@@ -24,6 +24,7 @@ only guild owner or member of the admin group are allowed to run commands (TODO)
 - `set-reactions`: set the emojis used for yes/no answers if you want to change them
 - `set-role`: set the role the bot will give to your users after they accept the rules
 - `set-admin-role`: set the role that will be allowed to interract with the bot (admins/moderators)
+- `set-message-id`: set the ID of the message the bot will track to give / take permission
 
 - `enable`: put the rules message in the rules channel, start tracking reactions and assigning role
 - `disable`: stop tracking the reactions to the rules message
@@ -31,12 +32,13 @@ only guild owner or member of the admin group are allowed to run commands (TODO)
 - `status`: show configuration
 
 ## TODO
-- give or take appropriate role / kick on interraction with rules
 - auto update rules if enabled
-- roles management: `set-role`, `set-admin-role`
-- read reactions at initialization to allow people in that accepted the rules when the bot was offline
+- allow moderation role to use the bot
+- read reactions at initialization to allow people in that accepted the rules when the bot was offline (strict mode)
+- strict mode togle, to not enforce every user to leave a like on the rules comment. (like the recheck at initialisation)
+- "debug" mode: log every action, but do not actually do anything
 - improve commands interface
-- command to start the bot by force tracking a message not initially sent by the bot
 - unit tests
+- keep track of what happens on the server: roles deleted, channels deleted, rules message deleted
+- ability to clear admin role, and log channel
 - dockerfile for even easier/secure deployment ?
-- strict mode, to not enforce every user to leave a like on the rules comment. (like the recheck at initialisation)

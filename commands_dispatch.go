@@ -9,6 +9,46 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+type TriggerFunc func(*Server, *discordgo.Message, []string)
+type Trigger struct {
+	trigger string
+	command TriggerFunc
+	help    string
+}
+type CommandsRegistry struct {
+	commands []Trigger
+}
+
+func (r *CommandsRegistry) register(command TriggerFunc, trigger string, help string) {
+	r.commands = append(r.commands, Trigger{trigger, command, help})
+}
+
+func botTriggered(botID string, m *discordgo.Message) bool {
+	for _, user := range m.Mentions {
+		if user.ID == botID {
+			return true
+		}
+	}
+	return false
+}
+func authorizedUser(s *discordgo.Session, guild *discordgo.Guild, authorID string, server *Server) bool {
+	if authorID == guild.OwnerID {
+		return true
+	}
+	member, err := s.GuildMember(guild.ID, authorID)
+	if err != nil {
+		log.Println("request by invalid user")
+		return false
+	}
+	for _, role := range member.Roles {
+		log.Println(role)
+		if role == server.AdminRole {
+			return true
+		}
+	}
+	return false
+}
+
 func messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID || !botTriggered(s.State.User.ID, m.Message) {
 		return

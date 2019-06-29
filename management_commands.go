@@ -5,24 +5,14 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-func botTriggered(botID string, m *discordgo.Message) bool {
-	for _, user := range m.Mentions {
-		if user.ID == botID {
-			return true
-		}
-	}
-	return false
-}
-
 /*
  * configure the bot (rules, channels for rules and logs, change reactions, etc...
  */
-func setRulesContent(server *Server, s *discordgo.Session, m *discordgo.Message) {
+func setRulesContent(server *Server, m *discordgo.Message, fields []string) {
 	re := regexp.MustCompile("(?s)```\n?(.+)\n?```")
 	results := re.FindSubmatch([]byte(m.Content))
 	if len(results) != 2 {
@@ -35,7 +25,11 @@ func setRulesContent(server *Server, s *discordgo.Session, m *discordgo.Message)
 	db.Save(&server)
 }
 
-func setRulesChannel(server *Server, s *discordgo.Session, m *discordgo.Message, channel string) {
+func setRulesChannel(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	channel := fields[0]
 	re := regexp.MustCompile("<#(.+)>")
 	results := re.FindSubmatch([]byte(channel))
 	if len(results) != 2 {
@@ -47,7 +41,11 @@ func setRulesChannel(server *Server, s *discordgo.Session, m *discordgo.Message,
 	db.Save(&server)
 }
 
-func setLogsChannel(server *Server, s *discordgo.Session, m *discordgo.Message, channel string) {
+func setLogsChannel(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	channel := fields[0]
 	re := regexp.MustCompile("<#(.*)>")
 	results := re.FindSubmatch([]byte(channel))
 	if len(results) != 2 {
@@ -63,14 +61,21 @@ func setLogsChannel(server *Server, s *discordgo.Session, m *discordgo.Message, 
 	db.Save(&server)
 }
 
-func setReactions(server *Server, s *discordgo.Session, m *discordgo.Message, reac1 string, reac2 string) {
-	server.ReactionOk = reac1
-	server.ReactionNo = reac2
+func setReactions(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 2 {
+		return
+	}
+	server.ReactionOk = fields[0]
+	server.ReactionNo = fields[1]
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("reactions set to %s / %s", server.ReactionOk, server.ReactionNo))
 	db.Save(&server)
 }
 
-func setRole(server *Server, s *discordgo.Session, m *discordgo.Message, role string) {
+func setRole(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	role := fields[0]
 	re := regexp.MustCompile("<@&(.*)>")
 	results := re.FindSubmatch([]byte(role))
 	if len(results) != 2 {
@@ -87,7 +92,11 @@ func setRole(server *Server, s *discordgo.Session, m *discordgo.Message, role st
 	db.Save(&server)
 }
 
-func setAdminRole(server *Server, s *discordgo.Session, m *discordgo.Message, role string) {
+func setAdminRole(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	role := fields[0]
 	re := regexp.MustCompile("<@&(.*)>")
 	results := re.FindSubmatch([]byte(role))
 	if len(results) != 2 {
@@ -116,7 +125,11 @@ func getRulesFromMessage(m *discordgo.Message) (string, error) {
 	return "", errors.New("no appropriate content in the message")
 }
 
-func setRuleMessageID(server *Server, s *discordgo.Session, m *discordgo.Message, messageID string) {
+func setRuleMessageID(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	messageID := fields[0]
 	message, err := s.ChannelMessage(server.RulesChannel, messageID)
 	if err != nil {
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("cant find message `%s` in channel <#%s>", messageID, server.RulesChannel))
@@ -131,13 +144,21 @@ func setRuleMessageID(server *Server, s *discordgo.Session, m *discordgo.Message
 	db.Save(&server)
 }
 
-func setStrict(server *Server, s *discordgo.Session, m *discordgo.Message, strictstring string) {
+func setStrict(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	strictstring := fields[0]
 	server.Strict = !(strictstring == "False" || strictstring == "false")
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("strict mode: %t", server.Strict))
 	db.Save(&server)
 }
 
-func setTest(server *Server, s *discordgo.Session, m *discordgo.Message, teststring string) {
+func setTest(server *Server, m *discordgo.Message, fields []string) {
+	if len(fields) != 1 {
+		return
+	}
+	teststring := fields[0]
 	server.Test = !(teststring == "False" || teststring == "false")
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("test mode: %t", server.Test))
 	db.Save(&server)
@@ -148,24 +169,28 @@ func setTest(server *Server, s *discordgo.Session, m *discordgo.Message, teststr
 *
 * adds the message as embeded, the emojis, and register the bot to add role for users
  */
-func enableRules(server *Server, s *discordgo.Session, m *discordgo.Message) {
+func enableRules(server *Server, m *discordgo.Message, fields []string) {
 	if server.Active {
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("rules already active in <#%s>", server.RulesChannel))
 		return
 	}
 	server.Active = true
-	message, _ := s.ChannelMessageSendEmbed(server.RulesChannel, &discordgo.MessageEmbed{Description: server.Rules})
-	server.RulesMessageID = message.ID
+	if server.RulesMessageID == "" {
+		message, _ := s.ChannelMessageSendEmbed(server.RulesChannel, &discordgo.MessageEmbed{Description: server.Rules})
+		server.RulesMessageID = message.ID
+	} else {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("re-using message in <#%s>", server.RulesChannel))
+	}
 
 	err1 := s.MessageReactionAdd(server.RulesChannel, server.RulesMessageID, server.ReactionOk)
 	err2 := s.MessageReactionAdd(server.RulesChannel, server.RulesMessageID, server.ReactionNo)
 	if err1 != nil || err2 != nil {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("rules already active in <#%s>", server.RulesChannel))
+		s.ChannelMessageSend(m.ChannelID, "error adding reactions to rules message")
 	}
 	db.Save(&server)
 }
 
-func disableRules(server *Server, s *discordgo.Session, m *discordgo.Message) {
+func disableRules(server *Server, m *discordgo.Message, fields []string) {
 	if !server.Active {
 		s.ChannelMessageSend(m.ChannelID, "Rules not in place")
 		return
@@ -175,7 +200,7 @@ func disableRules(server *Server, s *discordgo.Session, m *discordgo.Message) {
 	db.Save(&server)
 }
 
-func updateRules(server *Server, s *discordgo.Session, m *discordgo.Message) {
+func updateRules(server *Server, m *discordgo.Message, fields []string) {
 	if !server.Active {
 		s.ChannelMessageSend(m.ChannelID, "Rules not in place")
 		return
@@ -188,7 +213,7 @@ func updateRules(server *Server, s *discordgo.Session, m *discordgo.Message) {
 	}
 }
 
-func showStatus(server Server, s *discordgo.Session, m *discordgo.Message) {
+func showStatus(server *Server, m *discordgo.Message, fields []string) {
 
 	s.ChannelMessageSend(
 		m.ChannelID,
@@ -198,9 +223,9 @@ func showStatus(server Server, s *discordgo.Session, m *discordgo.Message) {
 		),
 	)
 }
-func showHelp(s *discordgo.Session, channelID string) {
+func showHelp(server *Server, m *discordgo.Message, fields []string) {
 	s.ChannelMessageSend(
-		channelID,
+		m.ChannelID,
 		fmt.Sprintf(
 			"```\n"+
 				"# Commands:\n"+
@@ -219,22 +244,4 @@ func showHelp(s *discordgo.Session, channelID string) {
 				"```",
 		),
 	)
-}
-
-func authorizedUser(s *discordgo.Session, guild *discordgo.Guild, authorID string, server *Server) bool {
-	if authorID == guild.OwnerID {
-		return true
-	}
-	member, err := s.GuildMember(guild.ID, authorID)
-	if err != nil {
-		log.Println("request by invalid user")
-		return false
-	}
-	for _, role := range member.Roles {
-		log.Println(role)
-		if role == server.AdminRole {
-			return true
-		}
-	}
-	return false
 }

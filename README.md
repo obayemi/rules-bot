@@ -32,13 +32,9 @@ only guild owner or member of the admin group are allowed to run commands (TODO)
 - `status`: show configuration
 
 ## TODO
-- auto update rules if enabled
-- allow moderation role to use the bot
-- read reactions at initialization to allow people in that accepted the rules when the bot was offline (strict mode)
-- strict mode togle, to not enforce every user to leave a like on the rules comment. (like the recheck at initialisation)
-- "debug" mode: log every action, but do not actually do anything
+- ~read reactions at initialization to allow people in that accepted the rules when the bot was offline (strict mode)~ -> can't get more than 100 reactions to a message in discord
+- ~strict mode togle, to not enforce every user to leave a like on the rules comment. (like the recheck at initialisation)~
 - improve commands interface
 - unit tests
 - keep track of what happens on the server: roles deleted, channels deleted, rules message deleted
-- ability to clear admin role, and log channel
 - dockerfile for even easier/secure deployment ?

@@ -8,54 +8,54 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func logInterraction(s *discordgo.Session, m *discordgo.MessageReaction, server *Server, action string, event string) {
-	log.Printf("%s: %s", m.UserID, action)
+func logInterraction(s *discordgo.Session, userID string, server *Server, action string, event string) {
+	log.Printf("%s: %s", userID, action)
 	if server.LogChannelID == "" {
 		return
 	}
-	if server.Debug {
+	if server.Test {
 		action += "(DEBUG)"
 	}
 	s.ChannelMessageSendEmbed(
 		server.LogChannelID,
 		&discordgo.MessageEmbed{
 			Title:       action,
-			Description: fmt.Sprintf("<@%s>: %s", m.UserID, event),
+			Description: fmt.Sprintf("<@%s>: %s", userID, event),
 		},
 	)
 }
 
-func handleReactionOk(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
-	if !server.Debug {
-		if err := s.GuildMemberRoleAdd(m.GuildID, m.UserID, server.Role); err != nil {
+func handleReactionOk(s *discordgo.Session, userID string, server *Server) {
+	if !server.Test {
+		if err := s.GuildMemberRoleAdd(server.GuildID, userID, server.Role); err != nil {
 			log.Println(err)
-			logInterraction(s, m, server, "add-role", "error settig the role")
+			logInterraction(s, userID, server, "add-role", "error settig the role")
 			return
 		}
 	}
-	logInterraction(s, m, server, "add-role", "accepted the rules")
+	logInterraction(s, userID, server, "add-role", "accepted the rules")
 }
 
-func handleReactionKo(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
-	if !server.Debug {
-		if err := s.GuildMemberDeleteWithReason(m.GuildID, m.UserID, "rejected the server rules"); err != nil {
+func handleReactionKo(s *discordgo.Session, userID string, server *Server) {
+	if !server.Test {
+		if err := s.GuildMemberDeleteWithReason(server.GuildID, userID, "rejected the server rules"); err != nil {
 			log.Println(err)
-			logInterraction(s, m, server, "kick", "error kicking user")
+			logInterraction(s, userID, server, "kick", "error kicking user")
 			return
 		}
 	}
-	logInterraction(s, m, server, "kick", "rejected the rules")
+	logInterraction(s, userID, server, "kick", "rejected the rules")
 }
 
-func handleReactionRemoveOk(s *discordgo.Session, m *discordgo.MessageReaction, server *Server) {
-	if !server.Debug {
-		if err := s.GuildMemberRoleRemove(m.GuildID, m.UserID, server.Role); err != nil {
+func handleReactionRemoveOk(s *discordgo.Session, userID string, server *Server) {
+	if !server.Test {
+		if err := s.GuildMemberRoleRemove(server.GuildID, userID, server.Role); err != nil {
 			log.Println(err)
-			logInterraction(s, m, server, "remove-role", "error removing user permission")
+			logInterraction(s, userID, server, "remove-role", "error removing user permission")
 			return
 		}
 	}
-	logInterraction(s, m, server, "remove-role", "un-accepted the rules")
+	logInterraction(s, userID, server, "remove-role", "un-accepted the rules")
 }
 
 func getServer(server *Server, m *discordgo.MessageReaction) error {
@@ -69,7 +69,7 @@ func getServer(server *Server, m *discordgo.MessageReaction) error {
 	return nil
 }
 
-func ReactionAddHandler(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
+func reactionAddHandler(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
 	server := Server{}
 	if err := getServer(&server, m.MessageReaction); err != nil {
 		log.Println(err)
@@ -77,14 +77,14 @@ func ReactionAddHandler(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
 	}
 
 	if m.Emoji.Name == server.ReactionOk {
-		handleReactionOk(s, m.MessageReaction, &server)
+		handleReactionOk(s, m.UserID, &server)
 	}
 	if m.Emoji.Name == server.ReactionNo {
-		handleReactionKo(s, m.MessageReaction, &server)
+		handleReactionKo(s, m.UserID, &server)
 	}
 }
 
-func ReactionRemoveHandler(s *discordgo.Session, m *discordgo.MessageReactionRemove) {
+func reactionRemoveHandler(s *discordgo.Session, m *discordgo.MessageReactionRemove) {
 	server := Server{}
 	if err := getServer(&server, m.MessageReaction); err != nil {
 		log.Println(err)
@@ -92,6 +92,6 @@ func ReactionRemoveHandler(s *discordgo.Session, m *discordgo.MessageReactionRem
 	}
 
 	if m.Emoji.Name == server.ReactionOk {
-		handleReactionRemoveOk(s, m.MessageReaction, &server)
+		handleReactionRemoveOk(s, m.UserID, &server)
 	}
 }

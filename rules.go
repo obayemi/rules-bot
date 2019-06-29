@@ -24,7 +24,7 @@ type Server struct {
 	ReactionOk     string `gorm:"default:'\u2705'"`
 	ReactionNo     string `gorm:"default:'\u274C'"`
 	Active         bool
-	Debug          bool
+	Test           bool
 	Strict         bool
 }
 
@@ -58,9 +58,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("error fetching user information, %s\n", err)
 	}
-	DiscordSession.AddHandler(MessageHandler)
-	DiscordSession.AddHandler(ReactionAddHandler)
-	DiscordSession.AddHandler(ReactionRemoveHandler)
+	DiscordSession.AddHandler(messageHandler)
+	DiscordSession.AddHandler(reactionAddHandler)
+	DiscordSession.AddHandler(reactionRemoveHandler)
 	if err := DiscordSession.Open(); err != nil {
 		log.Fatalf("error opening connection to Discord, %s\n", err)
 	}

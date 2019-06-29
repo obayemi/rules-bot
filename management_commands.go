@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -103,9 +104,42 @@ func setAdminRole(server *Server, s *discordgo.Session, m *discordgo.Message, ro
 	db.Save(&server)
 }
 
+func getRulesFromMessage(m *discordgo.Message) (string, error) {
+	if m.Content != "" {
+		return m.Content, nil
+	}
+	for _, embeded := range m.Embeds {
+		if embeded.Description != "" {
+			return embeded.Description, nil
+		}
+	}
+	return "", errors.New("no appropriate content in the message")
+}
+
 func setRuleMessageID(server *Server, s *discordgo.Session, m *discordgo.Message, messageID string) {
-	server.RulesMessageID = messageID
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("tracking rules on message: %s", messageID))
+	message, err := s.ChannelMessage(server.RulesChannel, messageID)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("cant find message `%s` in channel <#%s>", messageID, server.RulesChannel))
+		return
+	}
+	if rules, err := getRulesFromMessage(message); err == nil {
+		server.Rules = rules
+	}
+	server.RulesMessageID = message.ID
+
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("tracking rules on message: %s\nnew rules: \n```markdown\n%s\n```", server.RulesMessageID, server.Rules))
+	db.Save(&server)
+}
+
+func setStrict(server *Server, s *discordgo.Session, m *discordgo.Message, strictstring string) {
+	server.Strict = !(strictstring == "False" || strictstring == "false")
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("strict mode: %t", server.Strict))
+	db.Save(&server)
+}
+
+func setTest(server *Server, s *discordgo.Session, m *discordgo.Message, teststring string) {
+	server.Test = !(teststring == "False" || teststring == "false")
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("test mode: %t", server.Test))
 	db.Save(&server)
 }
 
@@ -203,97 +237,4 @@ func authorizedUser(s *discordgo.Session, guild *discordgo.Guild, authorID strin
 		}
 	}
 	return false
-}
-
-func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.Author.ID == s.State.User.ID || !botTriggered(s.State.User.ID, m.Message) {
-		return
-	}
-	guild, err := s.Guild(m.GuildID)
-	if err != nil {
-		log.Printf("command on invalid server %s: %s", m.GuildID, m.Content)
-		return
-	}
-	server := Server{}
-	result := db.Where(Server{GuildID: m.GuildID}).FirstOrInit(&server)
-
-	if !authorizedUser(s, guild, m.Author.ID, &server) {
-		// TODO: check ig author is part of admin role
-		return
-	}
-
-	// let the menthion be the rirst thing in the comment
-	reg := regexp.MustCompile(fmt.Sprintf("<@!?(%s)>", s.State.User.ID))
-	if reg.FindStringIndex(m.Content)[0] != 0 {
-		return
-	}
-
-	log.Printf("%s: %s\n", m.Author.ID, m.Content)
-
-	/*
-	   result.RecordNotFound() is not useful now, but I keep it in place to ease the eventual migration from `FirstOrInit` to `First`
-	*/
-	if result.RecordNotFound() || db.NewRecord(server) {
-		log.Printf("command on unregistered server %s: %s", m.GuildID, m.Content)
-	} else if result.Error != nil {
-		log.Println(result.Error)
-		return
-	}
-	fields := strings.Fields(m.Content)
-
-	// no point to continue if there's no command. Help maybe?
-	if len(fields) <= 1 {
-		return
-	}
-
-	switch fields[1] {
-
-	case "set-rules":
-		setRulesContent(&server, s, m.Message)
-	case "set-rules-channel":
-		if len(fields) != 3 {
-			return
-		}
-		setRulesChannel(&server, s, m.Message, fields[2])
-	case "set-logs-channel":
-		if len(fields) != 3 {
-			return
-		}
-		setLogsChannel(&server, s, m.Message, fields[2])
-	case "set-reactions":
-		if len(fields) != 4 {
-			log.Println("missing set-reaction-args", fields)
-			return
-		}
-		setReactions(&server, s, m.Message, fields[2], fields[3])
-	case "set-role":
-		if len(fields) != 3 {
-			return
-		}
-		setRole(&server, s, m.Message, fields[2])
-	case "set-admin-role":
-		if len(fields) != 3 {
-			return
-		}
-		setAdminRole(&server, s, m.Message, fields[2])
-	case "set-message-id":
-		if len(fields) != 3 {
-			return
-		}
-		setRuleMessageID(&server, s, m.Message, fields[2])
-
-	case "disable":
-		disableRules(&server, s, m.Message)
-	case "update":
-		updateRules(&server, s, m.Message)
-	case "enable":
-		enableRules(&server, s, m.Message)
-
-	case "status":
-		showStatus(server, s, m.Message)
-		return
-	default:
-		showHelp(s, m.ChannelID)
-		return
-	}
 }

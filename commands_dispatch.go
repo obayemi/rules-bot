@@ -9,18 +9,36 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-type TriggerFunc func(*Server, *discordgo.Message, []string)
-type Trigger struct {
-	trigger string
-	command TriggerFunc
-	help    string
-}
-type CommandsRegistry struct {
-	commands []Trigger
+var registry = CommandsRegistry{}
+
+func init() {
+	registry.register(setRulesContent, "set-rules", "`\u200B`\u200B`<RULES>`\u200B`\u200B`", "set the rules, put them inside a block code (markdown allowed)")
+	registry.register(setRulesChannel, "set-rules-channel", "#<CHANNEL>", "set the channel the bot will post its message in")
+	registry.register(setLogsChannel, "set-logs-channel", "#<CHANNEL>", "set the channel the bot will log its interractions with users in")
+	registry.register(setReactions, "set-reactions", "<OK> <KO>", "set the emojis used for yes/no answers if you want to change them")
+	registry.register(setRole, "set-role", "@<ROLE>", "set the role the bot will give to your users after they accept the rules")
+	registry.register(setAdminRole, "set-admin-role", "@<ROLE>", "set the role that will be allowed to interract with the bot (admins/moderators)")
+	registry.register(setRuleMessageID, "set-message-id", "<MESSAGE_ID>", "set the ID of the message the bot will track to give / take permission")
+
+	registry.register(enableRules, "enable", "", "put the rules message in the rules channel, start tracking reactions and assigning role")
+	registry.register(disableRules, "disable", "", "stop tracking the reactions to the rules message")
+	registry.register(updateRules, "update", "", "apply recent rules change to the ")
+	registry.register(showStatus, "status", "", "show configuration")
 }
 
-func (r *CommandsRegistry) register(command TriggerFunc, trigger string, help string) {
-	r.commands = append(r.commands, Trigger{trigger, command, help})
+type TriggerFunc func(*Server, *discordgo.Message, []string)
+type Trigger struct {
+	Trigger    string
+	Command    TriggerFunc
+	Invocation string
+	Help       string
+}
+type CommandsRegistry struct {
+	Commands []Trigger
+}
+
+func (r *CommandsRegistry) register(command TriggerFunc, trigger string, invocation string, help string) {
+	r.Commands = append(r.Commands, Trigger{trigger, command, invocation, help})
 }
 
 func botTriggered(botID string, m *discordgo.Message) bool {
@@ -89,65 +107,19 @@ func messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if len(fields) <= 1 {
 		return
 	}
-
-	switch fields[1] {
-
-	case "set-rules":
-		setRulesContent(&server, s, m.Message)
-	case "set-rules-channel":
-		if len(fields) != 3 {
+	for _, command := range registry.Commands {
+		if command.Trigger == fields[1] {
+			command.Command(&server, m.Message, fields[2:])
 			return
 		}
-		setRulesChannel(&server, s, m.Message, fields[2])
-	case "set-logs-channel":
-		if len(fields) != 3 {
-			return
-		}
-		setLogsChannel(&server, s, m.Message, fields[2])
-	case "set-reactions":
-		if len(fields) != 4 {
-			log.Println("missing set-reaction-args", fields)
-			return
-		}
-		setReactions(&server, s, m.Message, fields[2], fields[3])
-	case "set-role":
-		if len(fields) != 3 {
-			return
-		}
-		setRole(&server, s, m.Message, fields[2])
-	case "set-admin-role":
-		if len(fields) != 3 {
-			return
-		}
-		setAdminRole(&server, s, m.Message, fields[2])
-	case "set-message-id":
-		if len(fields) != 3 {
-			return
-		}
-		setRuleMessageID(&server, s, m.Message, fields[2])
-	//case "set-strict":
-	//if len(fields) != 3 {
-	//return
-	//}
-	//setStrict(&server, s, m.Message, fields[2])
-	case "set-test":
-		if len(fields) != 3 {
-			return
-		}
-		setTest(&server, s, m.Message, fields[2])
-
-	case "disable":
-		disableRules(&server, s, m.Message)
-	case "update":
-		updateRules(&server, s, m.Message)
-	case "enable":
-		enableRules(&server, s, m.Message)
-
-	case "status":
-		showStatus(server, s, m.Message)
-		return
-	default:
-		showHelp(s, m.ChannelID)
-		return
 	}
+	showHelp(m.ChannelID)
+}
+
+func showHelp(channelID string) {
+	help := []string{}
+	for _, command := range registry.Commands {
+		help = append(help, fmt.Sprintf("`%s %s`: %s", command.Trigger, command.Invocation, command.Help))
+	}
+	DiscordSession.ChannelMessageSend(channelID, "```\n"+strings.Join(help, "\n")+"```")
 }

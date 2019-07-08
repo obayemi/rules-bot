@@ -104,7 +104,7 @@ func setAdminRole(server *Server, m *discordgo.Message, fields []string) {
 	}
 	roleID := string(results[1])
 	server.AdminRole = roleID
-	if server.Role == "" {
+	if server.AdminRole == "" {
 		DiscordSession.ChannelMessageSend(m.ChannelID, "cleared admin user role")
 	} else {
 		DiscordSession.ChannelMessageSend(m.ChannelID, fmt.Sprintf("new admin role: %s", server.AdminRole))

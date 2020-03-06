@@ -13,10 +13,10 @@ pub struct Guild {
     pub rules_channel_id: Option<i64>,
     pub log_channel_id: Option<i64>,
     pub rules_message_id: Option<i64>,
-    reaction_ok: String,
-    reaction_reject: String,
+    pub reaction_ok: String,
+    pub reaction_reject: String,
     pub active: bool,
-    strict: bool,
+    pub strict: bool,
 }
 
 #[derive(Queryable, Debug)]
@@ -68,10 +68,36 @@ impl Into<GuildUpdate> for ModeratorGroupUpdate {
     }
 }
 
+#[derive(AsChangeset)]
+#[table_name = "guilds"]
+pub struct RulesChannelUpdate {
+    pub rules_channel_id: i64,
+}
+impl Into<GuildUpdate> for RulesChannelUpdate {
+    fn into(self) -> GuildUpdate {
+        GuildUpdate::RulesChannelUpdate(self)
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "guilds"]
+pub struct LogsChannelUpdate {
+    pub log_channel_id: i64,
+}
+impl Into<GuildUpdate> for LogsChannelUpdate {
+    fn into(self) -> GuildUpdate {
+        GuildUpdate::LogsChannelUpdate(self)
+    }
+}
+
 pub enum GuildUpdate {
     RulesMessageUpdate(RulesMessageUpdate),
     RulesContentUpdate(RulesContentUpdate),
     ModeratorGroupUpdate(ModeratorGroupUpdate),
+    RulesChannelUpdate(RulesChannelUpdate),
+    LogsChannelUpdate(LogsChannelUpdate),
+    ClearModeratorGroup,
+    UnbindMessage,
     EnableBot,
     DisableBot,
 }
@@ -134,6 +160,19 @@ impl Guild {
             GuildUpdate::ModeratorGroupUpdate(u) => {
                 diesel::update(self).set(u).get_result(connection)
             }
+            GuildUpdate::RulesChannelUpdate(u) => {
+                diesel::update(self).set(u).get_result(connection)
+            }
+            GuildUpdate::LogsChannelUpdate(u) => diesel::update(self).set(u).get_result(connection),
+            GuildUpdate::ClearModeratorGroup => diesel::update(self)
+                .set(guilds::admin_role.eq(Option::<i64>::None))
+                .get_result(connection),
+            GuildUpdate::UnbindMessage => diesel::update(self)
+                .set((
+                    guilds::rules_message_id.eq(Option::<i64>::None),
+                    guilds::rules_channel_id.eq(Option::<i64>::None),
+                ))
+                .get_result(connection),
             GuildUpdate::EnableBot => diesel::update(self)
                 .set(guilds::active.eq(true))
                 .get_result(connection),

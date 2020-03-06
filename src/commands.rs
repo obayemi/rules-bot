@@ -1,9 +1,10 @@
 use crate::checks::ADMIN_CHECK;
 use crate::db::DbKey;
 use crate::models::guilds::{
-    Guild, GuildUpdate, ModeratorGroupUpdate, RulesContentUpdate, RulesMessageUpdate,
+    Guild, GuildUpdate, LogsChannelUpdate, ModeratorGroupUpdate, RulesChannelUpdate,
+    RulesContentUpdate, RulesMessageUpdate,
 };
-use log::info;
+use log::{error, info};
 use serenity::framework::standard::CommandError;
 
 use serenity::framework::standard::{
@@ -24,7 +25,8 @@ enum SingleValueError {
     MultipleValue,
 }
 
-fn get_single_value<T>(v: &[T]) -> Result<&T, SingleValueError> {
+fn get_single_value<T: std::fmt::Debug>(v: &[T]) -> Result<&T, SingleValueError> {
+    info!("{}: {:?}", v.len(), v);
     match v.len() {
         0 => Err(SingleValueError::NoValue),
         1 => Ok(&v[0]),
@@ -140,10 +142,7 @@ pub fn set_moderator_group(ctx: &mut Context, msg: &Message) -> CommandResult {
                         admin_role: *role_id.as_u64() as i64,
                     },
                 )
-                .expect(&format!(
-                    "couldn't update moderator group for guild {}",
-                    guild.id
-                ));
+                .expect("couldn't update moderator group for guild");
             msg.reply(&ctx, "ok")?;
             info!(
                 "moderator group for guild {} set to {}",
@@ -158,6 +157,82 @@ pub fn set_moderator_group(ctx: &mut Context, msg: &Message) -> CommandResult {
             msg.reply(&ctx, "too many roles mentioned")?;
         }
     }
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn set_rules_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+
+    let guild_lock = msg.guild(&ctx).unwrap();
+    let guild = guild_lock.read();
+    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+
+    if guild_conf.rules_message_id != None {
+        msg.reply(
+            &ctx,
+            "can't set the rules channel while hooked to a message, please unbind message first",
+        )?;
+        return Ok(());
+    }
+    match args.single::<ChannelId>() {
+        Ok(channel_id) => {
+            guild_conf.update(
+                &connection,
+                RulesChannelUpdate {
+                    rules_channel_id: *channel_id.as_u64() as i64,
+                },
+            )?;
+            msg.reply(&ctx, format!("rules channel is now {}", channel_id))?;
+        }
+        Err(err) => {
+            info!("argument is not a mention: {}", err);
+            msg.reply(&ctx, "first argument should be a channel mention")?;
+        }
+    };
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn set_logs_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+
+    let guild_lock = msg.guild(&ctx).unwrap();
+    let guild = guild_lock.read();
+    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+
+    match args.single::<ChannelId>() {
+        Ok(channel_id) => {
+            guild_conf.update(
+                &connection,
+                LogsChannelUpdate {
+                    log_channel_id: *channel_id.as_u64() as i64,
+                },
+            )?;
+            msg.reply(&ctx, format!("logs channel is now {}", channel_id))?;
+        }
+        Err(err) => {
+            info!("argument is not a mention: {}", err);
+            msg.reply(&ctx, "first argument should be a channel mention")?;
+        }
+    };
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn clear_moderator_group(ctx: &mut Context, msg: &Message) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+
+    let guild_lock = msg.guild(&ctx).unwrap();
+    let guild = guild_lock.read();
+    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+    guild_conf.update(&connection, GuildUpdate::ClearModeratorGroup)?;
+    msg.reply(&ctx, "cleared moderator group")?;
     Ok(())
 }
 
@@ -185,6 +260,64 @@ pub fn debug(ctx: &mut Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
+//#[display_in_help(false)]
+pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+    let status_str = MessageBuilder::new()
+        .push_bold("rules:\n")
+        .push(&guild.rules)
+        .push("\n")
+        .push_bold("rules channel: ")
+        .push(match guild.rules_channel_id {
+            Some(channel_id) => channel_id.to_string(),
+            None => "None".to_string(),
+        })
+        .push("\n")
+        .push_bold("rules message: ")
+        .push(match guild.rules_message_id {
+            Some(message_id) => message_id.to_string(),
+            None => "None".to_string(),
+        })
+        .push("\n")
+        .push_bold("moderator role: ")
+        .push(match guild.admin_role {
+            Some(admin_role) => admin_role.to_string(),
+            None => "None".to_string(),
+        })
+        .push("\n")
+        .push_bold("log channel: ")
+        .push(match guild.log_channel_id {
+            Some(log_channel_id) => log_channel_id.to_string(),
+            None => "None".to_string(),
+        })
+        .push("\n")
+        .push_bold("reactions: ")
+        .push(&guild.reaction_ok)
+        .push(" / ")
+        .push(&guild.reaction_reject)
+        .push("\n")
+        .push_bold("strict: ")
+        .push(if guild.strict { "true" } else { "false" })
+        .push("\n")
+        .build();
+    msg.channel_id.send_message(&ctx, |m| {
+        m.embed(|e| {
+            e.title(format!(
+                "guild rules - ({})",
+                if guild.active { "active" } else { "inactive" }
+            ));
+            e.description(status_str);
+            e.colour(if guild.active { 0x00_ff_00 } else { 0xff_00_00 });
+            e
+        });
+        m
+    })?;
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
 pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
@@ -193,19 +326,67 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
         return Ok(());
     }
     match (&guild.rules_message_id, &guild.rules_channel_id) {
-        (Some(_), _) => {
+        (Some(m_id), Some(c_id)) => {
             msg.reply(&ctx, "rules bot enabled")?;
             guild.update(&connection, GuildUpdate::EnableBot)?;
         }
-        (_, Some(channel_id)) => {
+        (None, Some(channel_id)) => {
+            match ChannelId(*channel_id as u64).send_message(&ctx, |m| {
+                m.embed(|e| {
+                    e.title("welcome to this server, please read and accept these rules to proceed to the channels");
+                    e.description(&guild.rules);
+                    e
+                });
+                m
+            }) {
+                Ok(rules_message) => {
+                    guild.update(
+                        &connection, 
+                    RulesMessageUpdate {
+                        rules_message_id: *rules_message.id.as_u64() as i64,
+                        rules_channel_id: *channel_id,
+                        rules: guild.rules.clone(),
+                    },
+                        )?;
+                    msg.reply(
+                    &ctx,
+                    format!("rules message created in channel {}", channel_id),
+                )?;},
+                Err(error) => {
+                    error!("couldn't create rules message, {}", error);
+                    msg.reply(&ctx, "an error occured")?;
+                }
+            };
+        }
+        (Some(m_id), None) => {
             msg.reply(
                 &ctx,
-                format!("rules message created in channel {}", channel_id),
+                format!(
+                    "setup invalid: unexpected message id {} without registered rules channel",
+                    m_id
+                ),
             )?;
         }
         (None, None) => {
             msg.reply(&ctx, "setup incomplete")?;
         }
+    }
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn unbind_message(ctx: &mut Context, msg: &Message) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+    if guild.active {
+        msg.reply(
+            &ctx,
+            "please disable the bot before unbinding to the rules message",
+        )?;
+    } else {
+        msg.reply(&ctx, "bot config cleared")?;
+        guild.update(&connection, GuildUpdate::UnbindMessage)?;
     }
     Ok(())
 }
@@ -220,7 +401,7 @@ pub fn disable(ctx: &mut Context, msg: &Message) -> CommandResult {
         Ok(())
     } else {
         msg.reply(&ctx, "rules bot disabled")?;
-        guild.update(&connection, GuildUpdate::DisableBot);
+        guild.update(&connection, GuildUpdate::DisableBot)?;
         Ok(())
     }
 }

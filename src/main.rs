@@ -40,12 +40,17 @@ use commands::*;
 #[checks(Moderator)]
 #[commands(
     set_moderator_group,
+    clear_moderator_group,
     debug,
     hook_message,
     set_rules,
     enable,
     disable,
-    update_message
+    update_message,
+    unbind_message,
+    status,
+    set_rules_channel,
+    set_logs_channel
 )]
 struct General;
 

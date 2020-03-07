@@ -1,0 +1,21 @@
+version: "3.7"
+services:
+  bot:
+    image: registry.ikjpz.com/ikjpz.com/rules_bot
+    restart: unless-stopped
+    networks:
+      - default
+    environment:
+      DATABASE_URL: postgres://rules-bot:${POSTGRES_PASSWORD}@db/rules-bot
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+
+  db:
+    image: postgres
+    restart: always
+    volumes:
+      - db:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+volumes:
+  db:

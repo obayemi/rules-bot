@@ -1,14 +1,10 @@
 use serenity::framework::standard::{macros::check, Args, CheckResult, CommandOptions};
-use serenity::model::{
-    channel::Message,
-    id::{ChannelId, RoleId},
-};
+use serenity::model::channel::Message;
 use serenity::prelude::Context;
 
 // This imports `typemap`'s `Key` as `TypeMapKey`.
 use crate::db::DbKey;
 use crate::models::guilds::Guild;
-use serenity::prelude::*;
 
 #[check]
 #[name = "Admin"]

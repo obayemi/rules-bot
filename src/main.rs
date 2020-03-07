@@ -5,7 +5,7 @@ use crate::db::DbKey;
 use diesel::prelude::*;
 use std::env;
 
-use log::{error, info};
+use log::{error, info, warn};
 use serenity::framework::standard::macros::{group, help};
 use serenity::framework::standard::{
     help_commands, Args, CommandGroup, CommandResult, HelpOptions, StandardFramework,
@@ -84,11 +84,21 @@ impl EventHandler for Handler {
                 .expect("reaction not from active guild")
         };
 
-        if guild.rules_message_id == i64::from(add_reaction.message_id) {
-            println!("aaa")
-        } else {
-            println!("bbb")
+        if guild.rules_message_id != i64::from(add_reaction.message_id) {
+            return;
         };
+        info!("reaction received");
+        match add_reaction.emoji.as_data() {
+            r if r == guild.reaction_ok => {
+                info!("  => ok");
+            }
+            r if r == guild.reaction_reject => {
+                info!("  => reject");
+            }
+            _ => {
+                warn!("  => invalid reaction to rules message on");
+            }
+        }
     }
     fn reaction_remove(&self, _ctx: Context, _add_reaction: Reaction) {
         // let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();

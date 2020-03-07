@@ -34,12 +34,12 @@ fn get_single_value<T: std::fmt::Debug>(v: &[T]) -> Result<&T, SingleValueError>
     }
 }
 
-fn message_found(message_id: u64, channel_id: &ChannelId) -> String {
+fn message_found(message_id: u64, channel_id: ChannelId) -> String {
     MessageBuilder::new()
         .push("found message ")
         .push(message_id)
         .push(" in channel ")
-        .mention(channel_id)
+        .mention(&channel_id)
         .build()
 }
 
@@ -70,7 +70,7 @@ pub fn hook_message(ctx: &mut Context, msg: &Message, mut args: Args) -> Command
                     },
                 )
                 .unwrap();
-            let reply = message_found(message_id, &message.channel_id);
+            let reply = message_found(message_id, message.channel_id);
             msg.reply(&ctx, reply).expect("failed to send message");
             Ok(())
         } else {
@@ -104,9 +104,17 @@ pub fn update_message(ctx: &mut Context, msg: &Message) -> CommandResult {
             let channel_id = ChannelId(rules_channel_id as u64);
             let message_id = MessageId(rules_message_id as u64);
             match channel_id.message(&ctx, message_id) {
-                Ok(message) => {
+                Ok(_message) => {
                     channel_id
-                        .edit_message(&ctx, message_id, |m| m.content(guild_conf.rules))
+                        .edit_message(&ctx, message_id, |m| {
+                            m.content("");
+                            m.embed(|e| {
+                                e.title("welcome to this server, please read and accept these rules to proceed to the channels");
+                                e.description(&guild_conf.rules);
+                                e
+                            });
+                            m
+                        })
                         .unwrap();
                     msg.reply(&ctx, "updated")?;
                 }
@@ -327,8 +335,19 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
     }
     match (&guild.rules_message_id, &guild.rules_channel_id) {
         (Some(m_id), Some(c_id)) => {
-            msg.reply(&ctx, "rules bot enabled")?;
-            guild.update(&connection, GuildUpdate::EnableBot)?;
+            match ChannelId(*c_id as u64).message(&ctx, *m_id as u64) {
+                Ok(rules_message) => {
+                    guild.update(&connection, GuildUpdate::EnableBot)?;
+                    rules_message.react(&ctx, guild.reaction_ok)?;
+                    rules_message.react(&ctx, guild.reaction_reject)?;
+                    msg.reply(&ctx, "rules bot enabled")?;
+                }
+                Err(err) => {
+                    error!("couldn't get rules message: {}", err);
+                    //guild.update(&connection, GuildUpdate::UnbindMessage)?;
+                    msg.reply(&ctx, "an error occured with the bot message")?;
+                }
+            }
         }
         (None, Some(channel_id)) => {
             match ChannelId(*channel_id as u64).send_message(&ctx, |m| {
@@ -342,16 +361,20 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
                 Ok(rules_message) => {
                     guild.update(
                         &connection, 
-                    RulesMessageUpdate {
-                        rules_message_id: *rules_message.id.as_u64() as i64,
-                        rules_channel_id: *channel_id,
-                        rules: guild.rules.clone(),
-                    },
-                        )?;
+                        RulesMessageUpdate {
+                            rules_message_id: *rules_message.id.as_u64() as i64,
+                            rules_channel_id: *channel_id,
+                            rules: guild.rules.clone(),
+                        },
+                    )?;
+                    guild.update(&connection, GuildUpdate::EnableBot)?;
+                    rules_message.react(&ctx, guild.reaction_ok)?;
+                    rules_message.react(&ctx, guild.reaction_reject)?;
                     msg.reply(
-                    &ctx,
-                    format!("rules message created in channel {}", channel_id),
-                )?;},
+                        &ctx,
+                        format!("rules message created in channel {}", channel_id),
+                    )?;
+                },
                 Err(error) => {
                     error!("couldn't create rules message, {}", error);
                     msg.reply(&ctx, "an error occured")?;
@@ -368,7 +391,7 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
             )?;
         }
         (None, None) => {
-            msg.reply(&ctx, "setup incomplete")?;
+            msg.reply(&ctx, "Setup incomplete, bot requires a channel to print the rules, or a message to track. See `~help` and `~status`")?;
         }
     }
     Ok(())

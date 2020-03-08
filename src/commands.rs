@@ -1,8 +1,8 @@
 use crate::checks::ADMIN_CHECK;
 use crate::db::DbKey;
 use crate::models::guilds::{
-    Guild, GuildUpdate, LogsChannelUpdate, ModeratorGroupUpdate, RulesChannelUpdate,
-    RulesContentUpdate, RulesMessageUpdate,
+    Guild, GuildUpdate, LogsChannelUpdate, MemberRoleUpdate, ModeratorRoleUpdate,
+    RulesChannelUpdate, RulesContentUpdate, RulesMessageUpdate,
 };
 use log::{error, info};
 use serenity::framework::standard::CommandError;
@@ -15,24 +15,10 @@ use serenity::framework::standard::{
 };
 use serenity::model::{
     channel::Message,
-    id::{ChannelId, MessageId},
+    id::{ChannelId, MessageId, RoleId},
 };
 use serenity::prelude::*;
 use serenity::utils::MessageBuilder;
-
-enum SingleValueError {
-    NoValue,
-    MultipleValue,
-}
-
-fn get_single_value<T: std::fmt::Debug>(v: &[T]) -> Result<&T, SingleValueError> {
-    info!("{}: {:?}", v.len(), v);
-    match v.len() {
-        0 => Err(SingleValueError::NoValue),
-        1 => Ok(&v[0]),
-        _ => Err(SingleValueError::MultipleValue),
-    }
-}
 
 fn message_found(message_id: u64, channel_id: ChannelId) -> String {
     MessageBuilder::new()
@@ -134,37 +120,71 @@ pub fn update_message(ctx: &mut Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 #[checks(Admin)]
-pub fn set_moderator_group(ctx: &mut Context, msg: &Message) -> CommandResult {
+pub fn set_moderator_role(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
     let guild_lock = msg.guild(&ctx).unwrap();
     let guild = guild_lock.read();
     let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
 
-    match get_single_value(&msg.mention_roles) {
+    match args.single::<RoleId>() {
         Ok(role_id) => {
-            guild_conf
-                .update(
-                    &connection,
-                    ModeratorGroupUpdate {
-                        admin_role: *role_id.as_u64() as i64,
-                    },
-                )
-                .expect("couldn't update moderator group for guild");
-            msg.reply(&ctx, "ok")?;
-            info!(
-                "moderator group for guild {} set to {}",
-                guild.id,
-                *role_id.as_u64() as i64
-            );
+            guild_conf.update(
+                &connection,
+                ModeratorRoleUpdate {
+                    admin_role: *role_id.as_u64() as i64,
+                },
+            )?;
+
+            msg.reply(
+                &ctx,
+                MessageBuilder::new()
+                    .push("moderator role is now ")
+                    .mention(&role_id)
+                    .build(),
+            )?;
         }
-        Err(SingleValueError::NoValue) => {
-            msg.reply(&ctx, "no role mentionned")?;
+        Err(err) => {
+            info!("argument is not a mention: {}", err);
+            msg.reply(&ctx, "first argument should be a channel mention")?;
         }
-        Err(SingleValueError::MultipleValue) => {
-            msg.reply(&ctx, "too many roles mentioned")?;
+    };
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn set_member_role(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+
+    let guild_lock = msg.guild(&ctx).unwrap();
+    let guild = guild_lock.read();
+    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+
+    match args.single::<RoleId>() {
+        Ok(role_id) => {
+            guild_conf.update(
+                &connection,
+                MemberRoleUpdate {
+                    member_role: *role_id.as_u64() as i64,
+                },
+            )?;
+
+            msg.reply(
+                &ctx,
+                MessageBuilder::new()
+                    .push("member role is now ")
+                    .mention(&role_id)
+                    .build(),
+            )?;
         }
-    }
+        Err(err) => {
+            info!("argument is not a mention: {}", err);
+            msg.reply(&ctx, "first argument should be a channel mention")?;
+        }
+    };
+
     Ok(())
 }
 
@@ -192,7 +212,13 @@ pub fn set_rules_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Co
                     rules_channel_id: *channel_id.as_u64() as i64,
                 },
             )?;
-            msg.reply(&ctx, format!("rules channel is now {}", channel_id))?;
+            msg.reply(
+                &ctx,
+                MessageBuilder::new()
+                    .push("rules channel is now ")
+                    .mention(&channel_id)
+                    .build(),
+            )?;
         }
         Err(err) => {
             info!("argument is not a mention: {}", err);
@@ -220,7 +246,13 @@ pub fn set_logs_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Com
                     log_channel_id: *channel_id.as_u64() as i64,
                 },
             )?;
-            msg.reply(&ctx, format!("logs channel is now {}", channel_id))?;
+            msg.reply(
+                &ctx,
+                MessageBuilder::new()
+                    .push("logs channel is now ")
+                    .mention(&channel_id)
+                    .build(),
+            )?;
         }
         Err(err) => {
             info!("argument is not a mention: {}", err);
@@ -233,13 +265,13 @@ pub fn set_logs_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Com
 
 #[command]
 #[only_in(guilds)]
-pub fn clear_moderator_group(ctx: &mut Context, msg: &Message) -> CommandResult {
+pub fn clear_moderator_role(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
     let guild_lock = msg.guild(&ctx).unwrap();
     let guild = guild_lock.read();
     let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
-    guild_conf.update(&connection, GuildUpdate::ClearModeratorGroup)?;
+    guild_conf.update(&connection, GuildUpdate::ClearModeratorRole)?;
     msg.reply(&ctx, "cleared moderator group")?;
     Ok(())
 }
@@ -266,37 +298,54 @@ pub fn debug(ctx: &mut Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
+fn quoted_rules(rules: &str) -> String {
+    "> ".to_string() + &rules.replace('\n', "\n> ")
+}
+
 #[command]
 #[only_in(guilds)]
 //#[display_in_help(false)]
 pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+    info!(
+        "guild id: {}",
+        msg.guild_id.map(|id| id.to_string()).unwrap()
+    );
     let status_str = MessageBuilder::new()
-        .push_bold("rules:\n")
-        .push(&guild.rules)
+        .push_bold_line("rules:")
+        .push_line(quoted_rules(&guild.rules))
         .push("\n")
         .push_bold("rules channel: ")
-        .push(match guild.rules_channel_id {
-            Some(channel_id) => channel_id.to_string(),
+        .push_line(match guild.rules_channel_id {
+            Some(channel_id) => ChannelId(channel_id as u64).mention(),
             None => "None".to_string(),
         })
-        .push("\n")
         .push_bold("rules message: ")
-        .push(match guild.rules_message_id {
-            Some(message_id) => message_id.to_string(),
+        .push(match (guild.rules_channel_id, guild.rules_message_id) {
+            (Some(channel_id), Some(message_id)) => format!(
+                "https://discordapp.com/channels/{}/{}/{}",
+                guild.guild_id, channel_id, message_id
+            ),
+            (_, Some(message_id)) => format!("Invalid message: {}", message_id),
+            (_, _) => "None".to_string(),
+        })
+        .push("\n")
+        .push_bold("member role: ")
+        .push(match guild.member_role {
+            Some(member_role) => RoleId(member_role as u64).mention(),
             None => "None".to_string(),
         })
         .push("\n")
         .push_bold("moderator role: ")
         .push(match guild.admin_role {
-            Some(admin_role) => admin_role.to_string(),
+            Some(admin_role) => RoleId(admin_role as u64).mention(),
             None => "None".to_string(),
         })
         .push("\n")
         .push_bold("log channel: ")
         .push(match guild.log_channel_id {
-            Some(log_channel_id) => log_channel_id.to_string(),
+            Some(log_channel_id) => ChannelId(log_channel_id as u64).mention(),
             None => "None".to_string(),
         })
         .push("\n")
@@ -372,7 +421,7 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
                     rules_message.react(&ctx, guild.reaction_reject)?;
                     msg.reply(
                         &ctx,
-                        format!("rules message created in channel {}", channel_id),
+						MessageBuilder::new().push("rules message created in channel ").mention(&rules_message.channel_id).build()
                     )?;
                 },
                 Err(error) => {

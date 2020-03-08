@@ -7,7 +7,7 @@ use std::fmt;
 #[derive(Queryable, Identifiable, Debug)]
 pub struct Guild {
     id: i32,
-    guild_id: i64,
+    pub guild_id: i64,
     pub admin_role: Option<i64>,
     pub rules: String,
     pub rules_channel_id: Option<i64>,
@@ -17,6 +17,7 @@ pub struct Guild {
     pub reaction_reject: String,
     pub active: bool,
     pub strict: bool,
+    pub member_role: Option<i64>,
 }
 
 #[derive(Queryable, Debug)]
@@ -31,6 +32,7 @@ pub struct ActiveGuild {
     pub reaction_ok: String,
     pub reaction_reject: String,
     pub strict: bool,
+    pub member_role: i64,
 }
 
 #[derive(AsChangeset)]
@@ -59,12 +61,23 @@ impl Into<GuildUpdate> for RulesContentUpdate {
 
 #[derive(AsChangeset)]
 #[table_name = "guilds"]
-pub struct ModeratorGroupUpdate {
+pub struct ModeratorRoleUpdate {
     pub admin_role: i64,
 }
-impl Into<GuildUpdate> for ModeratorGroupUpdate {
+impl Into<GuildUpdate> for ModeratorRoleUpdate {
     fn into(self) -> GuildUpdate {
-        GuildUpdate::ModeratorGroupUpdate(self)
+        GuildUpdate::ModeratorRoleUpdate(self)
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "guilds"]
+pub struct MemberRoleUpdate {
+    pub member_role: i64,
+}
+impl Into<GuildUpdate> for MemberRoleUpdate {
+    fn into(self) -> GuildUpdate {
+        GuildUpdate::MemberRoleUpdate(self)
     }
 }
 
@@ -93,10 +106,11 @@ impl Into<GuildUpdate> for LogsChannelUpdate {
 pub enum GuildUpdate {
     RulesMessageUpdate(RulesMessageUpdate),
     RulesContentUpdate(RulesContentUpdate),
-    ModeratorGroupUpdate(ModeratorGroupUpdate),
+    ModeratorRoleUpdate(ModeratorRoleUpdate),
+    MemberRoleUpdate(MemberRoleUpdate),
     RulesChannelUpdate(RulesChannelUpdate),
     LogsChannelUpdate(LogsChannelUpdate),
-    ClearModeratorGroup,
+    ClearModeratorRole,
     UnbindMessage,
     EnableBot,
     DisableBot,
@@ -108,6 +122,7 @@ impl Into<ActiveGuild> for Guild {
             id: self.id,
             guild_id: self.guild_id,
             admin_role: self.admin_role,
+            member_role: self.member_role.unwrap(),
             rules: self.rules,
             rules_channel_id: self.rules_channel_id.unwrap(),
             rules_message_id: self.rules_message_id.unwrap(),
@@ -133,8 +148,10 @@ impl Guild {
         info!("fetching active guild: {}", guild_id);
         Ok(guilds::table
             .filter(guilds::guild_id.eq(guild_id))
-            .filter(guilds::active.eq(true))
-            .filter(guilds::rules_channel_id.is_not_null())
+            //.filter(guilds::active.eq(true))
+            //.filter(guilds::rules_message_id.is_not_null())
+            //.filter(guilds::rules_channel_id.is_not_null())
+            //.filter(guilds::member_role.is_not_null())
             .get_result::<Guild>(connection)?
             .into())
     }
@@ -157,14 +174,15 @@ impl Guild {
             GuildUpdate::RulesContentUpdate(u) => {
                 diesel::update(self).set(u).get_result(connection)
             }
-            GuildUpdate::ModeratorGroupUpdate(u) => {
+            GuildUpdate::ModeratorRoleUpdate(u) => {
                 diesel::update(self).set(u).get_result(connection)
             }
+            GuildUpdate::MemberRoleUpdate(u) => diesel::update(self).set(u).get_result(connection),
             GuildUpdate::RulesChannelUpdate(u) => {
                 diesel::update(self).set(u).get_result(connection)
             }
             GuildUpdate::LogsChannelUpdate(u) => diesel::update(self).set(u).get_result(connection),
-            GuildUpdate::ClearModeratorGroup => diesel::update(self)
+            GuildUpdate::ClearModeratorRole => diesel::update(self)
                 .set(guilds::admin_role.eq(Option::<i64>::None))
                 .get_result(connection),
             GuildUpdate::UnbindMessage => diesel::update(self)

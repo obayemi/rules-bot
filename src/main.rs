@@ -2,7 +2,6 @@
 extern crate diesel;
 
 use crate::db::DbKey;
-use diesel::prelude::*;
 use std::env;
 
 use log::{error, info, warn};
@@ -39,8 +38,8 @@ use commands::*;
 #[only_in(guilds)]
 #[checks(Moderator)]
 #[commands(
-    set_moderator_group,
-    clear_moderator_group,
+    set_moderator_role,
+    clear_moderator_role,
     debug,
     hook_message,
     set_rules,
@@ -50,7 +49,8 @@ use commands::*;
     unbind_message,
     status,
     set_rules_channel,
-    set_logs_channel
+    set_logs_channel,
+    set_member_role
 )]
 struct General;
 
@@ -80,11 +80,12 @@ impl EventHandler for Handler {
                 .unwrap()
                 .read()
                 .id;
-            Guild::active_from_guild_id(&connection, guild_id.into())
+            info!("guild id: {}", guild_id.to_string());
+            Guild::active_from_guild_id(&connection, *guild_id.as_u64() as i64)
                 .expect("reaction not from active guild")
         };
 
-        if guild.rules_message_id != i64::from(add_reaction.message_id) {
+        if guild.rules_message_id as u64 != *add_reaction.message_id.as_u64() {
             return;
         };
         info!("reaction received");
@@ -140,6 +141,7 @@ fn main() {
     let mut client = Client::new(&env::var("DISCORD_TOKEN").expect("token"), Handler)
         .expect("Error creating client");
 
+    info!("discord client initialized");
     client.with_framework(
         StandardFramework::new()
             .configure(|c| c.prefix("~")) // set the bot's prefix to "~"

@@ -5,20 +5,15 @@ use crate::db::DbKey;
 use std::env;
 
 use log::{error, info, warn};
+use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{group, help};
 use serenity::framework::standard::{
     help_commands, Args, CommandGroup, CommandResult, HelpOptions, StandardFramework,
 };
-use serenity::model::prelude::{Message, UserId};
-use serenity::{
-    client::{Client, Context, EventHandler},
-    model::{
-        channel::Reaction,
-        event::ResumedEvent,
-        gateway::Ready,
-        id::{ChannelId, MessageId},
-    },
+use serenity::model::prelude::{
+    ChannelId, GuildId, Member, Message, MessageId, Reaction, Ready, ResumedEvent, UserId,
 };
+use serenity::utils::{Colour, MessageBuilder};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -29,7 +24,7 @@ mod errors;
 mod models;
 mod schema;
 
-use models::guilds::Guild;
+use models::guilds::{ActiveGuild, Guild};
 
 use checks::*;
 use commands::*;
@@ -54,6 +49,51 @@ use commands::*;
 )]
 struct General;
 
+use diesel::PgConnection;
+fn get_active_guild(ctx: &Context, connection: &PgConnection, reaction: &Reaction) -> ActiveGuild {
+    let channel = reaction.channel(ctx);
+    let guild_channel_rwl = channel.unwrap().guild().unwrap();
+    let guild_channel = guild_channel_rwl.read();
+    let guild_id = guild_channel.guild_id;
+    Guild::active_from_guild_id(&connection, *guild_id.as_u64() as i64)
+        .expect("reaction not from active guild")
+}
+
+fn member_details(ctx: &Context, member: &Member) -> String {
+    let user = member.user_id().to_user(ctx).unwrap();
+    MessageBuilder::new()
+        .push_bold("member: ")
+        .mention(member)
+        .push("\n")
+        .push_bold("display_name: ")
+        .push_line(member.display_name().as_ref())
+        .push_bold("tag: ")
+        .push_line(user.tag())
+        .build()
+}
+
+fn log_event<C: Into<Colour>>(
+    ctx: &Context,
+    member: &Member,
+    logs_channel_id: Option<i64>,
+    event: &str,
+    color: C,
+) {
+    if let Some(c_id) = logs_channel_id {
+        ChannelId(c_id as u64)
+            .send_message(ctx, |m| {
+                m.embed(|e| {
+                    e.title(event);
+                    e.description(member_details(&ctx, member));
+                    e.colour(color);
+                    e
+                });
+                m
+            })
+            .unwrap();
+    }
+}
+
 struct Handler;
 impl EventHandler for Handler {
     fn ready(&self, ctx: Context, ready: Ready) {
@@ -70,48 +110,72 @@ impl EventHandler for Handler {
         info!("Resumed; trace: {:?}", resume.trace);
     }
 
-    fn reaction_add(&self, ctx: Context, add_reaction: Reaction) {
+    fn reaction_add(&self, ctx: Context, reaction: Reaction) {
         let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-        let guild = {
-            let guild_id = add_reaction
-                .channel(&ctx)
-                .unwrap()
-                .guild()
-                .unwrap()
-                .read()
-                .id;
-            info!("guild id: {}", guild_id.to_string());
-            Guild::active_from_guild_id(&connection, *guild_id.as_u64() as i64)
-                .expect("reaction not from active guild")
-        };
+        let guild = get_active_guild(&ctx, &connection, &reaction);
 
-        if guild.rules_message_id as u64 != *add_reaction.message_id.as_u64() {
+        if guild.rules_message_id as u64 != *reaction.message_id.as_u64() {
             return;
         };
+        let mut member = GuildId(guild.guild_id as u64)
+            .member(&ctx, reaction.user_id)
+            .unwrap();
         info!("reaction received");
-        match add_reaction.emoji.as_data() {
+        match reaction.emoji.as_data() {
             r if r == guild.reaction_ok => {
                 info!("  => ok");
+                member.add_role(&ctx, guild.member_role as u64).unwrap();
+                log_event(
+                    &ctx,
+                    &member,
+                    guild.log_channel_id,
+                    "User accepted the rules",
+                    0x00_ff_00,
+                );
             }
             r if r == guild.reaction_reject => {
                 info!("  => reject");
+                member.kick(&ctx).unwrap();
+                log_event(
+                    &ctx,
+                    &member,
+                    guild.log_channel_id,
+                    "User rejected the rules",
+                    0xff_00_00,
+                );
             }
             _ => {
                 warn!("  => invalid reaction to rules message on");
             }
         }
     }
-    fn reaction_remove(&self, _ctx: Context, _add_reaction: Reaction) {
-        // let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-        // msg.guild_id
-        // .and_then(|guild_id| {
-        //     Guild::from_guild_id(&connection, &guild_id.as_u64().to_string()).ok()
-        // })
+    fn reaction_remove(&self, ctx: Context, reaction: Reaction) {
+        let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+        let guild = get_active_guild(&ctx, &connection, &reaction);
+
+        if guild.rules_message_id as u64 != *reaction.message_id.as_u64() {
+            return;
+        };
+        let mut member = GuildId(guild.guild_id as u64)
+            .member(&ctx, reaction.user_id)
+            .unwrap();
+
+        if reaction.emoji.as_data() == guild.reaction_ok {
+            member.remove_role(&ctx, guild.member_role as u64).unwrap();
+            log_event(
+                &ctx,
+                &member,
+                guild.log_channel_id,
+                "User unaccepted the rules",
+                0x00_00_ff,
+            );
+        }
     }
 
     fn message_delete(&self, ctx: Context, channel_id: ChannelId, deleted_message_id: MessageId) {
         info!("message deleted: {} {}", channel_id, deleted_message_id);
         let _connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+        //channel_id.send_message()
         //let guild = Guild::from_guild_id(&connection, deleted_message_id.guild_id.unwrap().into())
         //.expect("aaaa");
     }

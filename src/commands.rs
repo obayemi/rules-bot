@@ -8,11 +8,9 @@ use crate::models::{
     },
     rules::{NewRule, Rule},
 };
-use crate::schema;
 use log::{error, info};
 use regex::Regex;
 use serde::Deserialize;
-use serde_yaml;
 use serenity::framework::standard::CommandError;
 
 use serenity::framework::standard::{
@@ -375,6 +373,57 @@ fn quoted_rules(rules: &str) -> String {
 
 #[command]
 #[only_in(guilds)]
+pub fn rules(ctx: &mut Context, msg: &Message) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+    let status_str = MessageBuilder::new()
+        .push_bold_line("rules:")
+        .push_line(quoted_rules(&guild.get_rules_detail(&connection)))
+        .build();
+    msg.channel_id.send_message(&ctx, |m| {
+        m.embed(|e| {
+            e.title(format!(
+                "guild rules - ({})",
+                if guild.active { "active" } else { "inactive" }
+            ));
+            e.description(status_str);
+            e.colour(if guild.active { 0x00_ff_00 } else { 0xff_00_00 });
+            e
+        });
+        m
+    })?;
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn rule(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+
+    let rule_name_arg = args
+        .single::<String>()
+        .map_err(|_| CommandError("require rule name".into()))?;
+
+    let status_str = MessageBuilder::new()
+        .push_line(
+            &guild
+                .get_rule_detail(&connection, &rule_name_arg)
+                .map_err(CommandError)?,
+        )
+        .build();
+    msg.channel_id.send_message(&ctx, |m| {
+        m.embed(|e| {
+            e.description(status_str);
+            e
+        });
+        m
+    })?;
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
 //#[display_in_help(false)]
 pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
@@ -385,7 +434,7 @@ pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
     );
     let status_str = MessageBuilder::new()
         .push_bold_line("rules:")
-        .push_line(quoted_rules(&guild.rules))
+        .push_line(quoted_rules(&guild.get_rules_message(&connection)))
         .push("\n")
         .push_bold("rules channel: ")
         .push_line(match guild.rules_channel_id {
@@ -455,66 +504,58 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
     }
     match (&guild.rules_message_id, &guild.rules_channel_id) {
         (Some(m_id), Some(c_id)) => {
-            match ChannelId(*c_id as u64).message(&ctx, *m_id as u64) {
-                Ok(rules_message) => {
-                    guild.update(&connection, GuildUpdate::EnableBot)?;
-                    rules_message.react(&ctx, guild.reaction_ok)?;
-                    rules_message.react(&ctx, guild.reaction_reject)?;
-                    msg.reply(&ctx, "rules bot enabled")?;
-                }
-                Err(err) => {
-                    error!("couldn't get rules message: {}", err);
-                    //guild.update(&connection, GuildUpdate::UnbindMessage)?;
-                    msg.reply(&ctx, "an error occured with the bot message")?;
-                }
-            }
+            let rules_message = ChannelId(*c_id as u64)
+                .message(&ctx, *m_id as u64)
+                .map_err(|_|
+                CommandError("an error occured with the bot message".into())
+                )?;
+            guild.update(&connection, GuildUpdate::EnableBot)?;
+            rules_message.react(&ctx, guild.reaction_ok)?;
+            rules_message.react(&ctx, guild.reaction_reject)?;
+            msg.reply(&ctx, "rules bot enabled")?;
+            Ok(())
         }
         (None, Some(channel_id)) => {
-            match ChannelId(*channel_id as u64).send_message(&ctx, |m| {
+            let rules_message = ChannelId(*channel_id as u64).send_message(&ctx, |m| {
                 m.embed(|e| {
                     e.title("welcome to this server, please read and accept these rules to proceed to the channels");
                     e.description(&guild.rules);
                     e
                 });
                 m
-            }) {
-                Ok(rules_message) => {
-                    guild.update(
-                        &connection, 
-                        RulesMessageUpdate {
-                            rules_message_id: *rules_message.id.as_u64() as i64,
-                            rules_channel_id: *channel_id,
-                            rules: guild.rules.clone(),
-                        },
-                    )?;
-                    guild.update(&connection, GuildUpdate::EnableBot)?;
-                    rules_message.react(&ctx, guild.reaction_ok)?;
-                    rules_message.react(&ctx, guild.reaction_reject)?;
-                    msg.reply(
-                        &ctx,
-						MessageBuilder::new().push("rules message created in channel ").mention(&rules_message.channel_id).build()
-                    )?;
+            }).map_err(
+                    |e| {
+                    error!("couldn't create rules message, {:?}", e);
+                    CommandError("an unexpected error occured".into())
+                })?;
+            guild.update(
+                &connection, 
+                RulesMessageUpdate {
+                    rules_message_id: *rules_message.id.as_u64() as i64,
+                    rules_channel_id: *channel_id,
+                    rules: guild.rules.clone(),
                 },
-                Err(error) => {
-                    error!("couldn't create rules message, {}", error);
-                    msg.reply(&ctx, "an error occured")?;
-                }
-            };
-        }
-        (Some(m_id), None) => {
+            )?;
+            guild.update(&connection, GuildUpdate::EnableBot)?;
+            rules_message.react(&ctx, guild.reaction_ok)?;
+            rules_message.react(&ctx, guild.reaction_reject)?;
             msg.reply(
                 &ctx,
-                format!(
+                MessageBuilder::new().push("rules message created in channel ").mention(&rules_message.channel_id).build()
+            )?;
+            Ok(())
+        }
+        (Some(m_id), None) => {
+                Err(CommandError(format!(
                     "setup invalid: unexpected message id {} without registered rules channel",
                     m_id
                 ),
-            )?;
+            ))
         }
         (None, None) => {
-            msg.reply(&ctx, "Setup incomplete, bot requires a channel to print the rules, or a message to track. See `~help` and `~status`")?;
+            Err(CommandError("Setup incomplete, bot requires a channel to print the rules, or a message to track. See `~help` and `~status`".into()))
         }
     }
-    Ok(())
 }
 
 #[command]
@@ -523,15 +564,14 @@ pub fn unbind_message(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
     if guild.active {
-        msg.reply(
-            &ctx,
-            "please disable the bot before unbinding to the rules message",
-        )?;
+        Err(CommandError(
+            "please disable the bot before unbinding to the rules message".into(),
+        ))
     } else {
         msg.reply(&ctx, "bot config cleared")?;
         guild.update(&connection, GuildUpdate::UnbindMessage)?;
+        Ok(())
     }
-    Ok(())
 }
 
 #[command]

@@ -19,6 +19,8 @@ pub struct Guild {
     pub active: bool,
     pub strict: bool,
     pub member_role: Option<i64>,
+    pub preface: String,
+    pub postface: String,
 }
 
 #[derive(Queryable, Debug)]
@@ -34,6 +36,8 @@ pub struct ActiveGuild {
     pub reaction_reject: String,
     pub strict: bool,
     pub member_role: i64,
+    pub preface: String,
+    pub postface: String,
 }
 impl ActiveGuild {}
 
@@ -132,6 +136,8 @@ impl Into<ActiveGuild> for Guild {
             reaction_ok: self.reaction_ok,
             reaction_reject: self.reaction_reject,
             strict: self.strict,
+            preface: self.preface,
+            postface: self.postface,
         }
     }
 }
@@ -218,6 +224,55 @@ impl Guild {
                 .set(guilds::active.eq(false))
                 .get_result(connection),
         }?)
+    }
+
+    pub fn get_rules_detail(&self, connection: &PgConnection) -> String {
+        let rules: Vec<Rule> = Rule::belonging_to(self)
+            .load::<Rule>(connection)
+            .expect("could not get rules");
+        rules
+            .into_iter()
+            .map(|r| format!("**{}**\n{}\n{}", r.name, r.rule, r.extra))
+            .collect::<Vec<String>>()
+            .join("\n\n")
+    }
+    pub fn get_rule_detail(
+        &self,
+        connection: &PgConnection,
+        rule_name: &str,
+    ) -> Result<String, String> {
+        use crate::schema::rules::dsl::*;
+        Ok(Rule::belonging_to(self)
+            .filter(name.eq(rule_name))
+            .load::<Rule>(connection)
+            .or(Err("could not get rules".to_string()))?
+            .into_iter()
+            .map(|r| format!("**{}**\n{}\n{}", r.name, r.rule, r.extra))
+            .collect::<Vec<String>>()
+            .join("\n\n"))
+    }
+
+    pub fn get_rules_message(&self, connection: &PgConnection) -> String {
+        let rules: Vec<Rule> = Rule::belonging_to(self)
+            .load::<Rule>(connection)
+            .expect("could not get rules");
+        if rules.is_empty() {
+            self.rules.clone()
+        } else {
+            vec![
+                self.preface.clone(),
+                rules
+                    .into_iter()
+                    .map(|r| format!("- {}", r.rule))
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+                self.postface.clone(),
+            ]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<String>>()
+            .join("\n")
+        }
     }
 }
 

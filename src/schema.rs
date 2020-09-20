@@ -12,6 +12,8 @@ table! {
         active -> Bool,
         strict -> Bool,
         member_role -> Nullable<Int8>,
+        preface -> Text,
+        postface -> Text,
     }
 }
 

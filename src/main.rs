@@ -43,6 +43,8 @@ use commands::*;
     disable,
     update_message,
     unbind_message,
+    rules,
+    rule,
     status,
     set_rules_channel,
     set_logs_channel,
@@ -209,7 +211,14 @@ fn main() {
     info!("discord client initialized");
     client.with_framework(
         StandardFramework::new()
-            .configure(|c| c.prefix(&env::var("DISCORD_PREFIX").unwrap_or("~".to_string())))
+            .configure(|c| {
+                c.prefix(&env::var("DISCORD_PREFIX").unwrap_or_else(|_| "~".to_string()))
+            })
+            .after(|ctx, msg, _, error| {
+                if let Err(e) = error {
+                    msg.reply(&ctx, format!("{}", e.0)).unwrap();
+                }
+            })
             .group(&GENERAL_GROUP)
             .help(&MY_HELP),
     );

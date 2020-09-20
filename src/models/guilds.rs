@@ -173,18 +173,13 @@ impl Guild {
     pub fn update_rules(
         &self,
         connection: &PgConnection,
-        new_rules: &Vec<NewRule>,
-    ) -> Result<(), ()> {
+        new_rules: &[NewRule],
+    ) -> Result<(), BotError> {
         use crate::schema::rules::dsl::*;
-        diesel::delete(Rule::belonging_to(self))
-            .execute(connection)
-            .unwrap();
-        println!("flushed");
+        diesel::delete(Rule::belonging_to(self)).execute(connection)?;
         diesel::insert_into(rules)
             .values(new_rules)
-            .execute(connection)
-            .unwrap();
-        println!("inserted");
+            .execute(connection)?;
         Ok(())
     }
 

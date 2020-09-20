@@ -44,42 +44,29 @@ pub fn hook_message(ctx: &mut Context, msg: &Message, mut args: Args) -> Command
     let guild = guild_lock.read();
     let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
 
-    if let Ok(message_id) = args.single::<u64>() {
-        msg.reply(&ctx, format!("searching message {}", message_id))
-            .expect("failed to send message");
-        let channels = guild.channels(&ctx).expect("guild should have channels");
-        if let Some(message) = channels
-            .iter()
-            .find_map(|(_cid, c)| c.message(&ctx, message_id).ok())
-        {
-            guild_conf
-                .update(
-                    &connection,
-                    RulesMessageUpdate {
-                        rules_message_id: message_id as i64,
-                        rules_channel_id: message.channel_id.into(),
-                        rules: message.content,
-                    },
-                )
-                .unwrap();
-            let reply = message_found(message_id, message.channel_id);
-            msg.reply(&ctx, reply).expect("failed to send message");
-            Ok(())
-        } else {
-            msg.reply(&ctx, format!("message with id {} not found", message_id))
-                .expect("failed to send message");
-            info!("message with id {} not found", message_id);
-            Err(CommandError(format!(
-                "message with id {} not found",
-                message_id
-            )))
-        }
-    } else {
-        msg.reply(&ctx, "missing message id")
-            .expect("faild to send message");
+    let message_id = args.single::<u64>().map_err(|_| {
         info!("missing message id");
-        Err(CommandError("missing message id".to_string()))
-    }
+        CommandError("missing message id".into())
+    })?;
+    msg.reply(&ctx, format!("searching message {}", message_id))?;
+    let channels = guild.channels(&ctx)?;
+    let message = channels
+        .iter()
+        .find_map(|(_cid, c)| c.message(&ctx, message_id).ok())
+        .ok_or_else(|| {
+            info!("message with id {} not found", message_id);
+            CommandError(format!("message with id {} not found", message_id))
+        })?;
+    guild_conf.update(
+        &connection,
+        RulesMessageUpdate {
+            rules_message_id: message_id as i64,
+            rules_channel_id: message.channel_id.into(),
+            rules: message.content,
+        },
+    )?;
+    msg.reply(&ctx, message_found(message_id, message.channel_id))?;
+    Ok(())
 }
 
 #[command]
@@ -336,34 +323,22 @@ pub fn input_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandR
     let rules_str = args.trimmed().message().to_string();
     let tmp = RULES_YAML_RE.captures(&rules_str).unwrap();
     //let rules =
-    match serde_yaml::from_str::<OverallRules>(&tmp["rules_yaml"]) {
-        Ok(rules) => {
-            //println!("{:?}", &rules);
-            guild
-                .update_rules(
-                    &connection,
-                    &rules
-                        .rules
-                        .into_iter()
-                        .map(|r| NewRule {
-                            guild_id: guild.id,
-                            name: r.name,
-                            rule: r.rule,
-                            extra: r.extra.unwrap_or("".into()),
-                        })
-                        .collect(),
-                )
-                .unwrap();
-            //msg.reply(&ctx, format!("{:?}", rules)).unwrap();
-        }
-        Err(e) => {
-            msg.reply(&ctx, format!("{}", e)).unwrap();
-        }
-    }
-
-    //println!("{:?}", &tmp[rules_yaml]);
-    //msg.reply(&ctx, format!("{:?}, ", &rules,)).unwrap();
-    //msg.reply(&ctx, "test").unwrap();
+    let rules = serde_yaml::from_str::<OverallRules>(&tmp["rules_yaml"])
+        .map_err(|e| CommandError(format!("{}", e)))?;
+    guild.update_rules(
+        &connection,
+        &rules
+            .rules
+            .into_iter()
+            .map(|r| NewRule {
+                guild_id: guild.id,
+                name: r.name,
+                rule: r.rule,
+                extra: r.extra.unwrap_or_else(|| "".into()),
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    msg.reply(&ctx, "rules set")?;
     Ok(())
 }
 

@@ -1,10 +1,18 @@
 use crate::checks::ADMIN_CHECK;
 use crate::db::DbKey;
-use crate::models::guilds::{
-    Guild, GuildUpdate, LogsChannelUpdate, MemberRoleUpdate, ModeratorRoleUpdate,
-    RulesChannelUpdate, RulesContentUpdate, RulesMessageUpdate,
+use crate::diesel::{BelongingToDsl, RunQueryDsl};
+use crate::models::{
+    guilds::{
+        Guild, GuildUpdate, LogsChannelUpdate, MemberRoleUpdate, ModeratorRoleUpdate,
+        RulesChannelUpdate, RulesContentUpdate, RulesMessageUpdate,
+    },
+    rules::{NewRule, Rule},
 };
+use crate::schema;
 use log::{error, info};
+use regex::Regex;
+use serde::Deserialize;
+use serde_yaml;
 use serenity::framework::standard::CommandError;
 
 use serenity::framework::standard::{
@@ -294,7 +302,70 @@ pub fn set_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandRes
 pub fn debug(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-    msg.reply(&ctx, format!("```json\n{:?}\n```", guild))?;
+    let rules = Rule::belonging_to(&guild)
+        .load::<Rule>(&connection)
+        .expect("could not get rules");
+    msg.reply(&ctx, format!("```json\n{:?}\n{:?}```", guild, rules))?;
+    Ok(())
+}
+
+use lazy_static::lazy_static;
+lazy_static! {
+    //static ref RULES_YAML_RE: Regex = Regex::new(r"```(?P<aa>.*)```").unwrap();
+    static ref RULES_YAML_RE: Regex = Regex::new(r"(?s)```(yaml|)\n(?P<rules_yaml>.+)\n```").unwrap();
+}
+
+#[derive(Deserialize, Debug)]
+struct RuleInput {
+    name: String,
+    rule: String,
+    extra: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OverallRules {
+    preface: String,
+    postface: String,
+    rules: Vec<RuleInput>,
+}
+
+#[command]
+#[only_in(guilds)]
+pub fn input_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+
+    let rules_str = args.trimmed().message().to_string();
+    let tmp = RULES_YAML_RE.captures(&rules_str).unwrap();
+    //let rules =
+    match serde_yaml::from_str::<OverallRules>(&tmp["rules_yaml"]) {
+        Ok(rules) => {
+            //println!("{:?}", &rules);
+            guild
+                .update_rules(
+                    &connection,
+                    &rules
+                        .rules
+                        .into_iter()
+                        .map(|r| NewRule {
+                            guild_id: guild.id,
+                            name: r.name,
+                            rule: r.rule,
+                            extra: r.extra.unwrap_or("".into()),
+                        })
+                        .collect(),
+                )
+                .unwrap();
+            //msg.reply(&ctx, format!("{:?}", rules)).unwrap();
+        }
+        Err(e) => {
+            msg.reply(&ctx, format!("{}", e)).unwrap();
+        }
+    }
+
+    //println!("{:?}", &tmp[rules_yaml]);
+    //msg.reply(&ctx, format!("{:?}, ", &rules,)).unwrap();
+    //msg.reply(&ctx, "test").unwrap();
     Ok(())
 }
 

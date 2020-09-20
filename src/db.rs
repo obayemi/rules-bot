@@ -1,15 +1,15 @@
-use diesel::r2d2::{ Pool, ConnectionManager, PoolError };
 use diesel::pg::PgConnection;
-use serenity::prelude::{TypeMapKey};
-use std::sync::Arc;
+use diesel::r2d2::{ConnectionManager, Pool, PoolError};
+use serenity::prelude::TypeMapKey;
 use std::env;
+use std::sync::Arc;
 
 type PgPool = Pool<ConnectionManager<PgConnection>>;
 // type PgPooledConnection = PooledConnection<ConnectionManager<PgConnection>>;
 
 use dotenv::dotenv;
 
-fn init_pool(database_url : &str) -> Result<PgPool, PoolError> {
+fn init_pool(database_url: &str) -> Result<PgPool, PoolError> {
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     Pool::builder().build(manager)
 }

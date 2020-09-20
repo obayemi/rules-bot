@@ -14,3 +14,20 @@ table! {
         member_role -> Nullable<Int8>,
     }
 }
+
+table! {
+    rules (id) {
+        id -> Int4,
+        guild_id -> Int4,
+        name -> Varchar,
+        rule -> Text,
+        extra -> Text,
+    }
+}
+
+joinable!(rules -> guilds (guild_id));
+
+allow_tables_to_appear_in_same_query!(
+    guilds,
+    rules,
+);

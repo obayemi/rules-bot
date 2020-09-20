@@ -1,3 +1,4 @@
+use crate::models::rules::{NewRule, Rule};
 use crate::schema::guilds;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
@@ -6,7 +7,7 @@ use std::fmt;
 
 #[derive(Queryable, Identifiable, Debug)]
 pub struct Guild {
-    id: i32,
+    pub id: i32,
     pub guild_id: i64,
     pub admin_role: Option<i64>,
     pub rules: String,
@@ -34,6 +35,7 @@ pub struct ActiveGuild {
     pub strict: bool,
     pub member_role: i64,
 }
+impl ActiveGuild {}
 
 #[derive(AsChangeset)]
 #[table_name = "guilds"]
@@ -160,6 +162,24 @@ impl Guild {
         Ok(guilds::table
             .filter(guilds::guild_id.eq(guild_id))
             .get_result::<Self>(connection)?)
+    }
+
+    pub fn update_rules(
+        &self,
+        connection: &PgConnection,
+        new_rules: &Vec<NewRule>,
+    ) -> Result<(), ()> {
+        use crate::schema::rules::dsl::*;
+        diesel::delete(Rule::belonging_to(self))
+            .execute(connection)
+            .unwrap();
+        println!("flushed");
+        diesel::insert_into(rules)
+            .values(new_rules)
+            .execute(connection)
+            .unwrap();
+        println!("inserted");
+        Ok(())
     }
 
     pub fn update<Update: Into<GuildUpdate>>(

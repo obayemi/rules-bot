@@ -36,6 +36,7 @@ use commands::*;
     set_moderator_role,
     clear_moderator_role,
     debug,
+    input_rules,
     hook_message,
     set_rules,
     enable,
@@ -208,7 +209,7 @@ fn main() {
     info!("discord client initialized");
     client.with_framework(
         StandardFramework::new()
-            .configure(|c| c.prefix("~")) // set the bot's prefix to "~"
+            .configure(|c| c.prefix(&env::var("DISCORD_PREFIX").unwrap_or("~".to_string())))
             .group(&GENERAL_GROUP)
             .help(&MY_HELP),
     );

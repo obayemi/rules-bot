@@ -145,10 +145,6 @@ impl Into<ActiveGuild> for Guild {
 use crate::errors::BotError;
 
 impl Guild {
-    pub fn new(guild_id: i64) -> NewGuild {
-        NewGuild { guild_id }
-    }
-
     pub fn active_from_guild_id(
         connection: &PgConnection,
         guild_id: i64,
@@ -170,13 +166,17 @@ impl Guild {
             .get_result::<Self>(connection)?)
     }
 
+    pub fn clear_rules(&self, connection: &PgConnection) -> Result<(), BotError> {
+        diesel::delete(Rule::belonging_to(self)).execute(connection)?;
+        Ok(())
+    }
+
     pub fn update_rules(
         &self,
         connection: &PgConnection,
         new_rules: &[NewRule],
     ) -> Result<(), BotError> {
         use crate::schema::rules::dsl::*;
-        diesel::delete(Rule::belonging_to(self)).execute(connection)?;
         diesel::insert_into(rules)
             .values(new_rules)
             .execute(connection)?;
@@ -227,7 +227,7 @@ impl Guild {
             .expect("could not get rules");
         rules
             .into_iter()
-            .map(|r| format!("**{}**\n{}\n{}", r.name, r.rule, r.extra))
+            .map(|r| format!("**{}**\n{}", r.name, r.rule,))
             .collect::<Vec<String>>()
             .join("\n\n")
     }
@@ -240,7 +240,7 @@ impl Guild {
         Ok(Rule::belonging_to(self)
             .filter(name.eq(rule_name))
             .load::<Rule>(connection)
-            .or(Err("could not get rules".to_string()))?
+            .map_err(|_| "could not get rules".to_string())?
             .into_iter()
             .map(|r| format!("**{}**\n{}\n{}", r.name, r.rule, r.extra))
             .collect::<Vec<String>>()
@@ -277,6 +277,10 @@ pub struct NewGuild {
     guild_id: i64,
 }
 impl NewGuild {
+    pub fn new(guild_id: i64) -> NewGuild {
+        NewGuild { guild_id }
+    }
+
     pub fn insert(&self, connection: &PgConnection) {
         debug!("inserting: {}", self.guild_id);
         diesel::insert_into(guilds::table)

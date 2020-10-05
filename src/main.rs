@@ -24,7 +24,7 @@ mod errors;
 mod models;
 mod schema;
 
-use models::guilds::{ActiveGuild, Guild};
+use models::guilds::{ActiveGuild, Guild, NewGuild};
 
 use checks::*;
 use commands::*;
@@ -36,6 +36,7 @@ use commands::*;
     set_moderator_role,
     clear_moderator_role,
     debug,
+    clear_rules,
     input_rules,
     hook_message,
     set_rules,
@@ -105,7 +106,7 @@ impl EventHandler for Handler {
         ready.guilds.iter().for_each(|guild_status| {
             let guild_id = guild_status.id();
             println!("guildId: kkk({})", guild_id.as_u64());
-            Guild::new(guild_id.into()).insert(&connection)
+            NewGuild::new(guild_id.into()).insert(&connection)
         })
     }
 
@@ -216,7 +217,7 @@ fn main() {
             })
             .after(|ctx, msg, _, error| {
                 if let Err(e) = error {
-                    msg.reply(&ctx, format!("{}", e.0)).unwrap();
+                    msg.reply(&ctx, &e.0).unwrap();
                 }
             })
             .group(&GENERAL_GROUP)

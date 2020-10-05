@@ -1,4 +1,4 @@
-use crate::checks::ADMIN_CHECK;
+use crate::checks::{ADMIN_CHECK, MODERATOR_CHECK};
 use crate::db::DbKey;
 use crate::diesel::{BelongingToDsl, RunQueryDsl};
 use crate::models::{
@@ -37,6 +37,7 @@ fn message_found(message_id: u64, channel_id: ChannelId) -> String {
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn hook_message(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
@@ -71,6 +72,7 @@ pub fn hook_message(ctx: &mut Context, msg: &Message, mut args: Args) -> Command
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn update_message(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
@@ -82,32 +84,25 @@ pub fn update_message(ctx: &mut Context, msg: &Message) -> CommandResult {
         (Some(rules_channel_id), Some(rules_message_id)) => {
             let channel_id = ChannelId(rules_channel_id as u64);
             let message_id = MessageId(rules_message_id as u64);
-            match channel_id.message(&ctx, message_id) {
-                Ok(_message) => {
-                    channel_id
-                        .edit_message(&ctx, message_id, |m| {
-                            m.content("");
-                            m.embed(|e| {
-                                e.title("welcome to this server, please read and accept these rules to proceed to the channels");
-                                e.description(&guild_conf.rules);
-                                e
-                            });
-                            m
-                        })
-                        .unwrap();
-                    msg.reply(&ctx, "updated")?;
-                }
-                Err(e) => {
-                    msg.reply(&ctx, "msg not found")?;
-                    info!("{:?}", e);
-                }
-            }
+            let _message = channel_id
+                .message(&ctx, message_id)
+                .map_err(|_| CommandError("rules message not found".to_string()))?;
+
+            channel_id
+                .edit_message(&ctx, message_id, |m| {
+                    m.content("");
+                    m.embed(|e| {
+                        e.title("welcome to this server, please read and accept these rules to proceed to the channels");
+                        e.description(&guild_conf.get_rules_message(&connection));
+                        e
+                    });
+                    m
+                })?;
+            msg.reply(&ctx, "updated")?;
+            Ok(())
         }
-        (_, _) => {
-            msg.reply(ctx, "no rules message tracked")?;
-        }
-    };
-    Ok(())
+        (_, _) => Err(CommandError("no rules message tracked".to_string())),
+    }
 }
 
 #[command]
@@ -148,6 +143,7 @@ pub fn set_moderator_role(ctx: &mut Context, msg: &Message, mut args: Args) -> C
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn set_member_role(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
@@ -183,6 +179,7 @@ pub fn set_member_role(ctx: &mut Context, msg: &Message, mut args: Args) -> Comm
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn set_rules_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
@@ -224,6 +221,7 @@ pub fn set_rules_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Co
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn set_logs_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
@@ -258,6 +256,7 @@ pub fn set_logs_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Com
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn clear_moderator_role(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
 
@@ -271,6 +270,7 @@ pub fn clear_moderator_role(ctx: &mut Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn set_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
@@ -283,14 +283,15 @@ pub fn set_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandRes
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 //#[display_in_help(false)]
 pub fn debug(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-    let rules = Rule::belonging_to(&guild)
-        .load::<Rule>(&connection)
-        .expect("could not get rules");
-    msg.reply(&ctx, format!("```json\n{:?}\n{:?}```", guild, rules))?;
+    //let rules = Rule::belonging_to(&guild)
+    //.load::<Rule>(&connection)
+    //.expect("could not get rules");
+    msg.reply(&ctx, format!("```json\n{:?}```", guild))?;
     Ok(())
 }
 
@@ -309,13 +310,25 @@ struct RuleInput {
 
 #[derive(Deserialize, Debug)]
 struct OverallRules {
-    preface: String,
-    postface: String,
+    //preface: String,
+    //postface: String,
     rules: Vec<RuleInput>,
 }
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
+pub fn clear_rules(ctx: &mut Context, msg: &Message) -> CommandResult {
+    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+    guild.clear_rules(&connection).unwrap();
+    msg.reply(&ctx, "rules cleared")?;
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[checks(Moderator)]
 pub fn input_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
@@ -353,16 +366,11 @@ pub fn rules(ctx: &mut Context, msg: &Message) -> CommandResult {
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
     let status_str = MessageBuilder::new()
         .push_bold_line("rules:")
-        .push_line(quoted_rules(&guild.get_rules_detail(&connection)))
+        .push_line(&guild.get_rules_detail(&connection))
         .build();
     msg.channel_id.send_message(&ctx, |m| {
         m.embed(|e| {
-            e.title(format!(
-                "guild rules - ({})",
-                if guild.active { "active" } else { "inactive" }
-            ));
             e.description(status_str);
-            e.colour(if guild.active { 0x00_ff_00 } else { 0xff_00_00 });
             e
         });
         m
@@ -399,6 +407,7 @@ pub fn rule(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 //#[display_in_help(false)]
 pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
@@ -470,6 +479,7 @@ pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
@@ -535,6 +545,7 @@ pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn unbind_message(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
@@ -551,6 +562,7 @@ pub fn unbind_message(ctx: &mut Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
+#[checks(Moderator)]
 pub fn disable(ctx: &mut Context, msg: &Message) -> CommandResult {
     let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
     let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");

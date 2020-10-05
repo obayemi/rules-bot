@@ -1,12 +1,11 @@
 use crate::checks::{ADMIN_CHECK, MODERATOR_CHECK};
 use crate::db::DbKey;
-use crate::diesel::{BelongingToDsl, RunQueryDsl};
 use crate::models::{
     guilds::{
         Guild, GuildUpdate, LogsChannelUpdate, MemberRoleUpdate, ModeratorRoleUpdate,
         RulesChannelUpdate, RulesContentUpdate, RulesMessageUpdate,
     },
-    rules::{NewRule, Rule},
+    rules::NewRule,
 };
 use log::{error, info};
 use regex::Regex;

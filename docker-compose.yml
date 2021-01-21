@@ -7,7 +7,7 @@ services:
     environment:
       DATABASE_URL: postgres://rules-bot:${POSTGRES_PASSWORD}@db/rules-bot
       DISCORD_TOKEN: ${DISCORD_TOKEN}
-      RUST_LOG: info
+      RUST_LOG: rules_bot=info
     depends_on:
       - db
 

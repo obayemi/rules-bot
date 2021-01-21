@@ -14,7 +14,7 @@ FROM rust as runtime
 RUN cargo install diesel_cli
 
 WORKDIR app
-COPY ./migrations ./
+COPY ./migrations ./migrations
 COPY --from=builder /usr/local/cargo/bin/rules-bot /usr/local/bin
 
 CMD ["/usr/local/bin/rules-bot"]

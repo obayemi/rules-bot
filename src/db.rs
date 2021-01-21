@@ -4,7 +4,7 @@ use serenity::prelude::TypeMapKey;
 use std::env;
 use std::sync::Arc;
 
-type PgPool = Pool<ConnectionManager<PgConnection>>;
+pub type PgPool = Pool<ConnectionManager<PgConnection>>;
 // type PgPooledConnection = PooledConnection<ConnectionManager<PgConnection>>;
 
 use dotenv::dotenv;

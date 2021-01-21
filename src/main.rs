@@ -6,9 +6,9 @@ use std::env;
 
 use log::{error, info, warn};
 use serenity::client::{Client, Context, EventHandler};
-use serenity::framework::standard::macros::{group, help};
+use serenity::framework::standard::macros::{group, help, hook};
 use serenity::framework::standard::{
-    help_commands, Args, CommandGroup, CommandResult, HelpOptions, StandardFramework,
+    help_commands, Args, CommandGroup, CommandError, CommandResult, HelpOptions, StandardFramework,
 };
 use serenity::model::prelude::{
     ChannelId, GuildId, Member, Message, MessageId, Reaction, Ready, ResumedEvent, UserId,
@@ -26,45 +26,46 @@ mod schema;
 
 use models::guilds::{ActiveGuild, Guild, NewGuild};
 
-use checks::*;
 use commands::*;
 
 #[group]
 #[only_in(guilds)]
-#[checks(Moderator)]
 #[commands(
     set_moderator_role,
-    clear_moderator_role,
+    //clear_moderator_role,
     debug,
     clear_rules,
     input_rules,
     hook_message,
-    set_rules,
+    //set_rules,
     enable,
-    disable,
-    update_message,
-    unbind_message,
-    rules,
+    //disable,
+    //update_message,
+    //unbind_message,
     rule,
     status,
-    set_rules_channel,
-    set_logs_channel,
+    //set_rules_channel,
+    //set_logs_channel,
     set_member_role
 )]
 struct General;
 
-use diesel::PgConnection;
-fn get_active_guild(ctx: &Context, connection: &PgConnection, reaction: &Reaction) -> ActiveGuild {
-    let channel = reaction.channel(ctx);
+use tokio::task;
+use db::PgPool;
+
+async fn get_active_guild(ctx: &Context, pool: Arc<PgPool>, reaction: &Reaction) -> ActiveGuild {
+    let channel = reaction.channel(ctx).await;
     let guild_channel_rwl = channel.unwrap().guild().unwrap();
-    let guild_channel = guild_channel_rwl.read();
+    let guild_channel = guild_channel_rwl;
     let guild_id = guild_channel.guild_id;
-    Guild::active_from_guild_id(&connection, *guild_id.as_u64() as i64)
-        .expect("reaction not from active guild")
+    task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        Guild::active_from_guild_id(&connection, *guild_id.as_u64() as i64)
+            .expect("reaction not from active guild")
+    }).await.unwrap()
 }
 
-fn member_details(ctx: &Context, member: &Member) -> String {
-    let user = member.user_id().to_user(ctx).unwrap();
+fn member_details(_ctx: &Context, member: &Member) -> String {
     MessageBuilder::new()
         .push_bold("member: ")
         .mention(member)
@@ -72,16 +73,16 @@ fn member_details(ctx: &Context, member: &Member) -> String {
         .push_bold("display_name: ")
         .push_line(member.display_name().as_ref())
         .push_bold("tag: ")
-        .push_line(user.tag())
+        .push_line(member.user.tag())
         .build()
 }
 
-fn log_event<C: Into<Colour>>(
+async fn log_event(
     ctx: &Context,
     member: &Member,
     logs_channel_id: Option<i64>,
     event: &str,
-    color: C,
+    color: Colour,
 ) {
     if let Some(c_id) = logs_channel_id {
         ChannelId(c_id as u64)
@@ -93,92 +94,99 @@ fn log_event<C: Into<Colour>>(
                     e
                 });
                 m
-            })
+            }).await
             .unwrap();
     }
 }
 
 struct Handler;
+
+#[serenity::async_trait]
 impl EventHandler for Handler {
-    fn ready(&self, ctx: Context, ready: Ready) {
-        let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        let connection = ctx.data.read().await.get::<DbKey>().unwrap().get().unwrap();
         info!("{} is connected!", ready.user.name);
+        info!("list of joined guilds");
         ready.guilds.iter().for_each(|guild_status| {
             let guild_id = guild_status.id();
-            println!("guildId: kkk({})", guild_id.as_u64());
+            info!("- {}", guild_id.as_u64());
             NewGuild::new(guild_id.into()).insert(&connection)
         })
     }
 
-    fn resume(&self, _: Context, resume: ResumedEvent) {
+    async fn resume(&self, _: Context, resume: ResumedEvent) {
         info!("Resumed; trace: {:?}", resume.trace);
     }
 
-    fn reaction_add(&self, ctx: Context, reaction: Reaction) {
-        let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-        let guild = get_active_guild(&ctx, &connection, &reaction);
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+        let ctx_data = ctx.data.read().await;
+        let pool = ctx_data.get::<DbKey>().unwrap();
+        let guild = get_active_guild(&ctx, pool.clone(), &reaction).await;
 
         if guild.rules_message_id as u64 != *reaction.message_id.as_u64() {
             return;
         };
         let mut member = GuildId(guild.guild_id as u64)
-            .member(&ctx, reaction.user_id)
+            .member(&ctx, reaction.user_id.unwrap())
+            .await
             .unwrap();
         info!("reaction received");
         match reaction.emoji.as_data() {
             r if r == guild.reaction_ok => {
                 info!("  => ok");
-                member.add_role(&ctx, guild.member_role as u64).unwrap();
+                member.add_role(&ctx, guild.member_role as u64).await.unwrap();
                 log_event(
                     &ctx,
                     &member,
                     guild.log_channel_id,
                     "User accepted the rules",
-                    0x00_ff_00,
-                );
+                    Colour::from(0x00_ff_00),
+                ).await;
             }
             r if r == guild.reaction_reject => {
                 info!("  => reject");
-                member.kick(&ctx).unwrap();
+                member.kick(&ctx).await.unwrap();
                 log_event(
                     &ctx,
                     &member,
                     guild.log_channel_id,
                     "User rejected the rules",
-                    0xff_00_00,
-                );
+                    Colour::from(0xff_00_00),
+                ).await;
             }
             _ => {
                 warn!("  => invalid reaction to rules message on");
             }
         }
     }
-    fn reaction_remove(&self, ctx: Context, reaction: Reaction) {
-        let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-        let guild = get_active_guild(&ctx, &connection, &reaction);
+    async fn reaction_remove(&self, ctx: Context, reaction: Reaction) {
+        let ctx_data = ctx.data.read().await;
+        let pool = ctx_data.get::<DbKey>().unwrap();
+        let guild = get_active_guild(&ctx, pool.clone(), &reaction).await;
 
         if guild.rules_message_id as u64 != *reaction.message_id.as_u64() {
             return;
         };
         let mut member = GuildId(guild.guild_id as u64)
-            .member(&ctx, reaction.user_id)
+            .member(&ctx, reaction.user_id.unwrap())
+            .await
             .unwrap();
 
         if reaction.emoji.as_data() == guild.reaction_ok {
-            member.remove_role(&ctx, guild.member_role as u64).unwrap();
+            member.remove_role(&ctx, guild.member_role as u64).await.unwrap();
             log_event(
                 &ctx,
                 &member,
                 guild.log_channel_id,
                 "User unaccepted the rules",
-                0x00_00_ff,
-            );
+                Colour::from(0x00_00_ff),
+            ).await;
         }
     }
 
-    fn message_delete(&self, ctx: Context, channel_id: ChannelId, deleted_message_id: MessageId) {
+    async fn message_delete(&self, ctx: Context, channel_id: ChannelId, deleted_message_id: MessageId) {
         info!("message deleted: {} {}", channel_id, deleted_message_id);
-        let _connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+        let _connection = ctx.data.read().await.get::<DbKey>().unwrap().get().unwrap();
         //channel_id.send_message()
         //let guild = Guild::from_guild_id(&connection, deleted_message_id.guild_id.unwrap().into())
         //.expect("aaaa");
@@ -187,18 +195,28 @@ impl EventHandler for Handler {
 
 #[help]
 #[max_levenshtein_distance(3)]
-fn my_help(
-    context: &mut Context,
+async fn my_help(
+    context: &Context,
     msg: &Message,
     args: Args,
     help_options: &'static HelpOptions,
     groups: &[&'static CommandGroup],
     owners: HashSet<UserId>,
 ) -> CommandResult {
-    help_commands::with_embeds(context, msg, args, help_options, groups, owners)
+    help_commands::with_embeds(context, msg, args, help_options, groups, owners).await;
+    Ok(())
 }
 
-fn main() {
+#[hook]
+async fn after_hook(ctx: &Context, msg:&Message, cmd_name:&str, error: Result<(),CommandError>) {
+    if let Err(why) = error {
+        warn!("Error in {}: {:?}", cmd_name, why);
+        msg.reply(&ctx, format!("{:?}", why)).await.unwrap();
+    }
+}
+
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
     let pool = db::establish_connection();
@@ -206,25 +224,24 @@ fn main() {
     //.get()
     //.expect("couldn't retrieve connection from the pool");
 
-    let mut client = Client::new(&env::var("DISCORD_TOKEN").expect("token"), Handler)
-        .expect("Error creating client");
-
+    let mut client = Client::new(&env::var("DISCORD_TOKEN").expect("token"))
+        .event_handler(Handler)
+        .framework(
+            StandardFramework::new()
+                .configure(|c| {
+                    c.prefix(&env::var("DISCORD_PREFIX").unwrap_or_else(|_| "~".to_string()))
+                })
+                .after(after_hook)
+                .group(&GENERAL_GROUP)
+                .help(&MY_HELP),
+            )
+        .await.expect("Error creating client");
     info!("discord client initialized");
-    client.with_framework(
-        StandardFramework::new()
-            .configure(|c| {
-                c.prefix(&env::var("DISCORD_PREFIX").unwrap_or_else(|_| "~".to_string()))
-            })
-            .after(|ctx, msg, _, error| {
-                if let Err(e) = error {
-                    msg.reply(&ctx, &e.0).unwrap();
-                }
-            })
-            .group(&GENERAL_GROUP)
-            .help(&MY_HELP),
-    );
-    client.data.write().insert::<db::DbKey>(Arc::new(pool));
-    if let Err(why) = client.start() {
+    {
+        let mut data = client.data.write().await;
+        data.insert::<db::DbKey>(Arc::new(pool));
+    }
+    if let Err(why) = client.start().await {
         error!("An error occurred while running the client: {:?}", why);
     }
 }

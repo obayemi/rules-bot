@@ -1,6 +1,7 @@
 version: "3.7"
 services:
   bot:
+    build: .
     image: registry.ikjpz.com/ikjpz.com/rules_bot
     restart: unless-stopped
     environment:

@@ -1,6 +1,7 @@
 use serenity::framework::standard::{macros::check, Args, CheckResult, CommandOptions};
 use serenity::model::channel::Message;
 use serenity::prelude::Context;
+use tokio::task;
 
 // This imports `typemap`'s `Key` as `TypeMapKey`.
 use crate::db::DbKey;
@@ -8,57 +9,70 @@ use crate::models::guilds::Guild;
 
 #[check]
 #[name = "Admin"]
-// Whether the check shall be tested in the help-system.
 #[check_in_help(true)]
-// Whether the check shall be displayed in the help-system.
 #[display_in_help(true)]
-pub fn admin_check(
-    ctx: &mut Context,
+pub async fn admin_check(
+    ctx: &Context,
     msg: &Message,
     _args: &mut Args,
     _options: &CommandOptions,
 ) -> CheckResult {
-    msg.member(&ctx.cache)
-        .and_then(|member| {
+    match msg.member(&ctx).await {
+        Ok(member) => {
             member
-                .permissions(&ctx.cache)
+                .permissions(&ctx)
+                .await
                 .map(|permissions| permissions.administrator())
-                .ok()
-        })
-        .unwrap_or(false)
-        .into()
+                .map_or_else(
+                    |_| CheckResult::Success,
+                    |_| CheckResult::new_user("user is not administrator")
+                )
+        },
+        Err(why) => {
+            CheckResult::new_user(why)
+        }
+    }
 }
 
 #[check]
 #[name = "Moderator"]
 #[check_in_help(true)]
 #[display_in_help(true)]
-pub fn moderator_check(
-    ctx: &mut Context,
+pub async fn moderator_check(
+    ctx: &Context,
     msg: &Message,
     _: &mut Args,
     _: &CommandOptions,
 ) -> CheckResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    msg.member(&ctx.cache)
-        .and_then(|member| {
-            let permissions = member
-                .permissions(&ctx.cache)
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild = msg.guild(&ctx).await.unwrap();
+
+    let guild_conf = task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        Guild::from_guild_id(&connection, guild.id.into()).unwrap()
+    }).await.unwrap();
+
+    match msg.member(&ctx).await {
+        Ok(member) => {
+            let admin_permission= member
+                .permissions(&ctx)
+                .await
                 .map(|permissions| permissions.administrator())
                 .ok();
-            if permissions == None || permissions == Some(true) {
-                return Some(true);
+
+            if admin_permission == Some(true) {
+                return CheckResult::Success;
             }
-            msg.guild_id
-                .and_then(|guild_id| Guild::from_guild_id(&connection, guild_id.into()).ok())
-                .and_then(|guild| guild.admin_role)
-                .map(|admin_role_id: i64| {
-                    member
-                        .roles
-                        .iter()
-                        .any(|r| (*r.as_u64() as i64) == admin_role_id)
-                })
-        })
-        .unwrap_or(false)
-        .into()
+            if member.roles
+                    .iter()
+                    .any(|r| Some(*r.as_u64() as i64) == guild_conf.admin_role) {
+                        CheckResult::Success
+                    } else {
+                        CheckResult::new_user("user don't have moderator role")
+                    }
+                },
+        Err(why) => {
+            CheckResult::new_user(why)
+        }
+    }
 }

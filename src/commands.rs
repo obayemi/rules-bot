@@ -1,22 +1,30 @@
-use crate::checks::{ADMIN_CHECK, MODERATOR_CHECK};
+use crate::checks::{MODERATOR_CHECK};
+// use crate::checks::{ADMIN_CHECK, MODERATOR_CHECK};
 use crate::db::DbKey;
+use tokio::task;
+use futures::stream::{self,StreamExt};
+use std::sync::Arc;
+use lazy_static::lazy_static;
 use crate::models::{
     guilds::{
-        Guild, GuildUpdate, LogsChannelUpdate, MemberRoleUpdate, ModeratorRoleUpdate,
-        RulesChannelUpdate, RulesContentUpdate, RulesMessageUpdate,
+        Guild, GuildUpdate, //LogsChannelUpdate,
+        MemberRoleUpdate,
+        ModeratorRoleUpdate,
+        // RulesChannelUpdate, RulesContentUpdate,
+        RulesMessageUpdate,
     },
     rules::NewRule,
 };
-use log::{error, info};
+// use log::{error, info};
 use regex::Regex;
 use serde::Deserialize;
-use serenity::framework::standard::CommandError;
 
 use serenity::framework::standard::{
     //macros::{check, command, group, help},
     macros::command,
     Args,
     CommandResult,
+    CommandError,
 };
 use serenity::model::{
     channel::Message,
@@ -37,105 +45,125 @@ fn message_found(message_id: u64, channel_id: ChannelId) -> String {
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn hook_message(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+pub async fn hook_message(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
 
-    let guild_lock = msg.guild(&ctx).unwrap();
-    let guild = guild_lock.read();
-    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+    let guild = msg.guild(&ctx).await.unwrap();
 
-    let message_id = args.single::<u64>().map_err(|_| {
-        info!("missing message id");
-        CommandError("missing message id".into())
-    })?;
-    msg.reply(&ctx, format!("searching message {}", message_id))?;
-    let channels = guild.channels(&ctx)?;
-    let message = channels
-        .iter()
-        .find_map(|(_cid, c)| c.message(&ctx, message_id).ok())
-        .ok_or_else(|| {
-            info!("message with id {} not found", message_id);
-            CommandError(format!("message with id {} not found", message_id))
-        })?;
-    guild_conf.update(
-        &connection,
-        RulesMessageUpdate {
-            rules_message_id: message_id as i64,
-            rules_channel_id: message.channel_id.into(),
-            rules: message.content,
-        },
-    )?;
-    msg.reply(&ctx, message_found(message_id, message.channel_id))?;
+    let guild_id = guild.id;
+    let p1 = pool.clone();
+    let guild_conf = task::spawn_blocking(move || {
+        let connection = &p1.get().unwrap();
+        Guild::from_guild_id(connection, guild_id.into()).unwrap()
+    }).await?;
+
+    let message_id = args.single::<u64>()
+        .map_err(|_| "missing message id")?;
+
+    msg.reply(&ctx, format!("searching message {}", message_id)).await?;
+    let channels = guild.channels(&ctx).await?;
+    let messages = stream::iter(channels)
+        .filter_map(|(_cid, c)| async move {
+            c.message(&ctx, message_id).await.ok()
+        })
+        .take(1)
+        .collect::<Vec<Message>>()
+        .await;
+    let message = messages
+        .first()
+        .ok_or_else(|| format!("message with id {} not found", message_id))?;
+    let m = message.clone();
+    task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        guild_conf.update(
+            &connection,
+            RulesMessageUpdate {
+                rules_message_id: message_id as i64,
+                rules_channel_id: m.channel_id.into(),
+                rules: m.content.clone(),
+            },
+        ).map_err(|_| "could not save found message")
+    }).await??;
+    msg.reply(&ctx, message_found(message_id, message.channel_id)).await?;
     Ok(())
 }
 
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn update_message(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+pub async fn update_message(ctx: &Context, msg: &Message) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
 
-    let guild_lock = msg.guild(&ctx).unwrap();
-    let guild = guild_lock.read();
-    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+    let p1 = pool.clone();
+    let guild = task::spawn_blocking(move || {
+        let connection = p1.get().unwrap();
+        Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))
+    }).await??;
 
-    match (guild_conf.rules_channel_id, guild_conf.rules_message_id) {
+    match (guild.rules_channel_id, guild.rules_message_id) {
         (Some(rules_channel_id), Some(rules_message_id)) => {
             let channel_id = ChannelId(rules_channel_id as u64);
             let message_id = MessageId(rules_message_id as u64);
             let _message = channel_id
-                .message(&ctx, message_id)
-                .map_err(|_| CommandError("rules message not found".to_string()))?;
+                .message(&ctx, message_id).await
+                .map_err(|_| "rules message not found")?;
+
+						let rule_message = task::spawn_blocking(move || {
+              let connection = pool.get().unwrap();
+							guild.get_rules_message(&connection)
+						}).await?;
 
             channel_id
                 .edit_message(&ctx, message_id, |m| {
                     m.content("");
                     m.embed(|e| {
-                        e.title("welcome to this server, please read and accept these rules to proceed to the channels");
-                        e.description(&guild_conf.get_rules_message(&connection));
+                        e.title("welcome to this server, please read and accept these  s to proceed to the channels");
+                        e.description(&rule_message);
                         e
                     });
                     m
-                })?;
-            msg.reply(&ctx, "updated")?;
+                }).await?;
+            msg.reply(&ctx, "updated").await?;
             Ok(())
         }
-        (_, _) => Err(CommandError("no rules message tracked".to_string())),
+        (_, _) => Ok(())// Err("no rules message tracked"),
     }
 }
 
 #[command]
 #[only_in(guilds)]
-#[checks(Admin)]
-pub fn set_moderator_role(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+pub async fn set_moderator_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
 
-    let guild_lock = msg.guild(&ctx).unwrap();
-    let guild = guild_lock.read();
-    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+    let p1 = pool.clone();
+    let guild = task::spawn_blocking(move || {
+      let connection = p1.get().unwrap();
+      Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))
+    }).await??;
 
-    match args.single::<RoleId>() {
-        Ok(role_id) => {
-            guild_conf.update(
-                &connection,
-                ModeratorRoleUpdate {
-                    admin_role: *role_id.as_u64() as i64,
-                },
-            )?;
+    let role_id = args
+        .single::<RoleId>()
+        .map_err(|_| "first argument should be a channel mention".to_string())?;
 
-            msg.reply(
-                &ctx,
-                MessageBuilder::new()
-                    .push("moderator role is now ")
-                    .mention(&role_id)
-                    .build(),
-            )?;
-        }
-        Err(err) => {
-            info!("argument is not a mention: {}", err);
-            msg.reply(&ctx, "first argument should be a channel mention")?;
-        }
-    };
+		task::spawn_blocking(move || {
+      let connection = pool.get().unwrap();
+      guild.update(
+          &connection,
+          ModeratorRoleUpdate {
+              admin_role: *role_id.as_u64() as i64,
+          },
+      ).map_err(|e| e.to_string())
+		}).await??;
+
+    msg.reply(
+        &ctx,
+        MessageBuilder::new()
+            .push("moderator role is now ")
+            .mention(&role_id)
+            .build(),
+    ).await?;
 
     Ok(())
 }
@@ -143,39 +171,41 @@ pub fn set_moderator_role(ctx: &mut Context, msg: &Message, mut args: Args) -> C
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn set_member_role(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
+pub async fn set_member_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
 
-    let guild_lock = msg.guild(&ctx).unwrap();
-    let guild = guild_lock.read();
-    let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
+    let p1 = pool.clone();
+    let guild = task::spawn_blocking(move || {
+      let connection = p1.get().unwrap();
+      Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))
+    }).await??;
 
-    match args.single::<RoleId>() {
-        Ok(role_id) => {
-            guild_conf.update(
-                &connection,
-                MemberRoleUpdate {
-                    member_role: *role_id.as_u64() as i64,
-                },
-            )?;
+    let role_id = args
+        .single::<RoleId>()
+        .map_err(|_| "first argument should be a channel mention".to_string())?;
+		task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        guild.update(
+          &connection,
+          MemberRoleUpdate {
+              member_role: *role_id.as_u64() as i64,
+          },
+        ).map_err(|e| e.to_string())
+  	}).await??;
 
-            msg.reply(
-                &ctx,
-                MessageBuilder::new()
-                    .push("member role is now ")
-                    .mention(&role_id)
-                    .build(),
-            )?;
-        }
-        Err(err) => {
-            info!("argument is not a mention: {}", err);
-            msg.reply(&ctx, "first argument should be a channel mention")?;
-        }
-    };
+    msg.reply(
+        &ctx,
+        MessageBuilder::new()
+            .push("member role is now ")
+            .mention(&role_id)
+            .build(),
+    ).await?;
 
     Ok(())
 }
 
+/*
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
@@ -193,27 +223,22 @@ pub fn set_rules_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Co
         )?;
         return Ok(());
     }
-    match args.single::<ChannelId>() {
-        Ok(channel_id) => {
-            guild_conf.update(
-                &connection,
-                RulesChannelUpdate {
-                    rules_channel_id: *channel_id.as_u64() as i64,
-                },
-            )?;
-            msg.reply(
-                &ctx,
-                MessageBuilder::new()
-                    .push("rules channel is now ")
-                    .mention(&channel_id)
-                    .build(),
-            )?;
-        }
-        Err(err) => {
-            info!("argument is not a mention: {}", err);
-            msg.reply(&ctx, "first argument should be a channel mention")?;
-        }
-    };
+    let channel_id = args
+        .single::<ChannelId>()
+        .map_err(|_| "first argument should be a channel mention".to_string())?;
+    guild_conf.update(
+        &connection,
+        RulesChannelUpdate {
+            rules_channel_id: *channel_id.as_u64() as i64,
+        },
+    )?;
+    msg.reply(
+        &ctx,
+        MessageBuilder::new()
+            .push("rules channel is now ")
+            .mention(&channel_id)
+            .build(),
+    )?;
 
     Ok(())
 }
@@ -228,27 +253,22 @@ pub fn set_logs_channel(ctx: &mut Context, msg: &Message, mut args: Args) -> Com
     let guild = guild_lock.read();
     let guild_conf = Guild::from_guild_id(&connection, guild.id.into()).unwrap();
 
-    match args.single::<ChannelId>() {
-        Ok(channel_id) => {
-            guild_conf.update(
-                &connection,
-                LogsChannelUpdate {
-                    log_channel_id: *channel_id.as_u64() as i64,
-                },
-            )?;
-            msg.reply(
-                &ctx,
-                MessageBuilder::new()
-                    .push("logs channel is now ")
-                    .mention(&channel_id)
-                    .build(),
-            )?;
-        }
-        Err(err) => {
-            info!("argument is not a mention: {}", err);
-            msg.reply(&ctx, "first argument should be a channel mention")?;
-        }
-    };
+    let channel_id = args
+        .single::<ChannelId>()
+        .map_err(|_| "first argument should be a channel mention".to_string())?;
+    guild_conf.update(
+        &connection,
+        LogsChannelUpdate {
+            log_channel_id: *channel_id.as_u64() as i64,
+        },
+    )?;
+    msg.reply(
+        &ctx,
+        MessageBuilder::new()
+            .push("logs channel is now ")
+            .mention(&channel_id)
+            .build(),
+    )?;
 
     Ok(())
 }
@@ -280,23 +300,24 @@ pub fn set_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandRes
     Ok(())
 }
 
+*/
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
 //#[display_in_help(false)]
-pub fn debug(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-    //let rules = Rule::belonging_to(&guild)
-    //.load::<Rule>(&connection)
-    //.expect("could not get rules");
-    msg.reply(&ctx, format!("```json\n{:?}```", guild))?;
+pub async fn debug(ctx: &Context, msg: &Message) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
+
+    let guild = task::spawn_blocking(move || {
+      let connection = pool.get().unwrap();
+      Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))
+    }).await??;
+    msg.reply(&ctx, format!("```json\n{:?}```", guild)).await?;
     Ok(())
 }
 
-use lazy_static::lazy_static;
 lazy_static! {
-    //static ref RULES_YAML_RE: Regex = Regex::new(r"```(?P<aa>.*)```").unwrap();
     static ref RULES_YAML_RE: Regex = Regex::new(r"(?s)```(yaml|)\n(?P<rules_yaml>.+)\n```").unwrap();
 }
 
@@ -305,9 +326,9 @@ struct RuleInput {
     name: String,
     rule: String,
     extra: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
+ }
+// 
+ #[derive(Deserialize, Debug)]
 struct OverallRules {
     //preface: String,
     //postface: String,
@@ -317,29 +338,43 @@ struct OverallRules {
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn clear_rules(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-    guild.clear_rules(&connection).unwrap();
-    msg.reply(&ctx, "rules cleared")?;
+pub async fn clear_rules(ctx: &Context, msg: &Message) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
+
+    task::spawn_blocking(move || -> Result<(),CommandError> {
+      let connection = pool.get().unwrap();
+      let guild = Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))?;
+      guild.clear_rules(&connection).map_err(|e| format!("{}", e))?;
+      Ok(())
+    }).await??;
+
+    msg.reply(&ctx, "rules cleared").await?;
     Ok(())
 }
 
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn input_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+pub async fn input_rules(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
+
+    let p1 = pool.clone();
+    let guild = task::spawn_blocking(move || {
+      let connection = p1.get().unwrap();
+      Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))
+    }).await??;
 
     let rules_str = args.trimmed().message().to_string();
     let tmp = RULES_YAML_RE.captures(&rules_str).unwrap();
-    //let rules =
     let rules = serde_yaml::from_str::<OverallRules>(&tmp["rules_yaml"])
-        .map_err(|e| CommandError(format!("{}", e)))?;
-    guild.update_rules(
-        &connection,
-        &rules
+        .map_err(|e| format!("{}", e))?;
+    task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        guild.update_rules(
+            &connection,
+            &rules
             .rules
             .into_iter()
             .map(|r| NewRule {
@@ -349,8 +384,9 @@ pub fn input_rules(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandR
                 extra: r.extra.unwrap_or_else(|| "".into()),
             })
             .collect::<Vec<_>>(),
-    )?;
-    msg.reply(&ctx, "rules set")?;
+            ).map_err(|e| format!("{}", e))
+    }).await??;
+    msg.reply(&ctx, "rules set").await?;
     Ok(())
 }
 
@@ -360,47 +396,36 @@ fn quoted_rules(rules: &str) -> String {
 
 #[command]
 #[only_in(guilds)]
-pub fn rules(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-    let status_str = MessageBuilder::new()
-        .push_bold_line("rules:")
-        .push_line(&guild.get_rules_detail(&connection))
-        .build();
+#[aliases(rules)]
+pub async fn rule(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = Arc::new(ctx.data.read().await.get::<DbKey>().unwrap().clone());
+    let guild_id = msg.guild_id.unwrap().into();
+    let status_str = task::spawn_blocking(move || -> CommandResult<String> {
+        let connection = pool.get().unwrap();
+        let guild = Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))?;
+        match args.single::<String>() {
+            Ok(rule_name_arg) => {
+                let rule = guild.get_rule_detail(&connection, &rule_name_arg)?;
+                Ok(MessageBuilder::new()
+                    .push_line(rule)
+                    .build())
+            },
+            Err(_) => {
+                Ok(MessageBuilder::new()
+                    .push_bold_line("rules:")
+                    .push_line(&guild.get_rules_detail(&connection))
+                    .build())
+            }
+        }
+    }).await??;
+
     msg.channel_id.send_message(&ctx, |m| {
         m.embed(|e| {
             e.description(status_str);
             e
         });
         m
-    })?;
-    Ok(())
-}
-
-#[command]
-#[only_in(guilds)]
-pub fn rule(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-
-    let rule_name_arg = args
-        .single::<String>()
-        .map_err(|_| CommandError("require rule name".into()))?;
-
-    let status_str = MessageBuilder::new()
-        .push_line(
-            &guild
-                .get_rule_detail(&connection, &rule_name_arg)
-                .map_err(CommandError)?,
-        )
-        .build();
-    msg.channel_id.send_message(&ctx, |m| {
-        m.embed(|e| {
-            e.description(status_str);
-            e
-        });
-        m
-    })?;
+    }).await?;
     Ok(())
 }
 
@@ -408,16 +433,21 @@ pub fn rule(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
 #[only_in(guilds)]
 #[checks(Moderator)]
 //#[display_in_help(false)]
-pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
-    info!(
-        "guild id: {}",
-        msg.guild_id.map(|id| id.to_string()).unwrap()
-    );
+pub async fn status(ctx: &Context, msg: &Message) -> CommandResult {
+    let pool = Arc::new(ctx.data.read().await.get::<DbKey>().unwrap().clone());
+
+    let guild_id = msg.guild_id.unwrap().into();
+
+    let (guild,message) = task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        let guild = Guild::from_guild_id(&connection, guild_id).unwrap();
+        let message = quoted_rules(&guild.get_rules_message(&connection));
+        (guild, message)
+    }).await?;
+
     let status_str = MessageBuilder::new()
         .push_bold_line("rules:")
-        .push_line(quoted_rules(&guild.get_rules_message(&connection)))
+        .push_line(message)
         .push("\n")
         .push_bold("rules channel: ")
         .push_line(match guild.rules_channel_id {
@@ -472,76 +502,93 @@ pub fn status(ctx: &mut Context, msg: &Message) -> CommandResult {
             e
         });
         m
-    })?;
+    }).await?;
     Ok(())
 }
 
+use serenity::model::channel::ReactionType;
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn enable(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+pub async fn enable(ctx: &Context, msg: &Message) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
+
+    let p1 = pool.clone();
+    let guild = Arc::new(task::spawn_blocking(move || {
+        Guild::from_guild_id(&p1.get().unwrap(), guild_id).unwrap()
+    }).await?);
     if guild.active {
-        msg.reply(&ctx, "rules already enabled")?;
+        msg.reply(&ctx, "rules already enabled".to_string()).await?;
         return Ok(());
     }
-    match (&guild.rules_message_id, &guild.rules_channel_id) {
+    match (guild.clone().rules_message_id, guild.clone().rules_channel_id) {
         (Some(m_id), Some(c_id)) => {
-            let rules_message = ChannelId(*c_id as u64)
-                .message(&ctx, *m_id as u64)
-                .map_err(|_|
-                CommandError("an error occured with the bot message".into())
-                )?;
-            guild.update(&connection, GuildUpdate::EnableBot)?;
-            rules_message.react(&ctx, guild.reaction_ok)?;
-            rules_message.react(&ctx, guild.reaction_reject)?;
-            msg.reply(&ctx, "rules bot enabled")?;
+            let rules_message = ChannelId(c_id as u64)
+                .message(&ctx, m_id as u64)
+                .await
+                .map_err(|_| "an error occured with the bot message".to_string())?;
+
+            let p2 = pool.clone();
+            let g = guild.clone();
+            task::spawn_blocking(move || {
+                g.update(&p2.get().unwrap(), GuildUpdate::EnableBot)
+            }).await?.map_err(|e| e.to_string())?;
+            rules_message.react(&ctx, ReactionType::from(guild.reaction_ok.chars().next().unwrap())).await?;
+            rules_message.react(&ctx, ReactionType::from(guild.reaction_reject.chars().next().unwrap())).await?;
+            msg.reply(&ctx, "rules bot enabled").await?;
             Ok(())
         }
         (None, Some(channel_id)) => {
-            let rules_message = ChannelId(*channel_id as u64).send_message(&ctx, |m| {
+            let rules_message = ChannelId(channel_id as u64).send_message(&ctx, |m| {
                 m.embed(|e| {
-                    e.title("welcome to this server, please read and accept these rules to proceed to the channels");
+                    e.title(format!("welcome to this server, please read and accept these rules (with \"{}\") to proceed to the channels", guild.reaction_ok));
                     e.description(&guild.rules);
                     e
                 });
                 m
-            }).map_err(
+            }).await
+            .map_err(
                     |e| {
-                    error!("couldn't create rules message, {:?}", e);
-                    CommandError("an unexpected error occured".into())
+                    format!("couldn't create rules message, {:?}", e)
                 })?;
-            guild.update(
-                &connection, 
-                RulesMessageUpdate {
-                    rules_message_id: *rules_message.id.as_u64() as i64,
-                    rules_channel_id: *channel_id,
-                    rules: guild.rules.clone(),
-                },
-            )?;
-            guild.update(&connection, GuildUpdate::EnableBot)?;
-            rules_message.react(&ctx, guild.reaction_ok)?;
-            rules_message.react(&ctx, guild.reaction_reject)?;
+            let g = guild.clone();
+            let p2 = pool.clone();
+            let rmid = rules_message.id;
+            let _a: Result<(),String> = task::spawn_blocking(move || {
+                let connection = &p2.get().unwrap();
+                g.update(
+                    connection,
+                    RulesMessageUpdate {
+                        rules_message_id: *rmid.as_u64() as i64,
+                        rules_channel_id: channel_id,
+                        rules: g.rules.clone(),
+                    }).map_err(|_| "couldn't set message id".to_string())?;
+                g.update(connection, GuildUpdate::EnableBot).map_err(|_| "couldn't set the guild as enabled".to_string())?;
+                Ok(())
+            }).await?;
+            rules_message.react(&ctx, ReactionType::from(guild.reaction_ok.chars().next().unwrap())).await?;
+            rules_message.react(&ctx, ReactionType::from(guild.reaction_reject.chars().next().unwrap())).await?;
             msg.reply(
                 &ctx,
                 MessageBuilder::new().push("rules message created in channel ").mention(&rules_message.channel_id).build()
-            )?;
+            ).await?;
             Ok(())
         }
         (Some(m_id), None) => {
-                Err(CommandError(format!(
+                Err(format!(
                     "setup invalid: unexpected message id {} without registered rules channel",
                     m_id
-                ),
-            ))
+                ).into(),
+            )
         }
         (None, None) => {
-            Err(CommandError("Setup incomplete, bot requires a channel to print the rules, or a message to track. See `~help` and `~status`".into()))
+            Err("Setup incomplete, bot requires a channel to print the rules, or a message to track. See `~help` and `~status`".into())
         }
     }
 }
 
+/*
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
@@ -558,19 +605,28 @@ pub fn unbind_message(ctx: &mut Context, msg: &Message) -> CommandResult {
         Ok(())
     }
 }
+*/
 
 #[command]
 #[only_in(guilds)]
 #[checks(Moderator)]
-pub fn disable(ctx: &mut Context, msg: &Message) -> CommandResult {
-    let connection = ctx.data.read().get::<DbKey>().unwrap().get().unwrap();
-    let guild = Guild::from_guild_id(&connection, msg.guild_id.unwrap().into()).expect("aaaa");
+pub async fn disable(ctx: &Context, msg: &Message) -> CommandResult {
+    let pool = ctx.data.read().await.get::<DbKey>().unwrap().clone();
+    let guild_id = msg.guild_id.unwrap().into();
+
+    let p1 = pool.clone();
+    let guild = task::spawn_blocking(move || {
+        let connection = p1.get().unwrap();
+        Guild::from_guild_id(&connection, guild_id).map_err(|e| format!("{}", e))
+    }).await??;
+
     if !guild.active {
-        msg.reply(&ctx, "rules not enabled")?;
         Ok(())
+        //Err("rules are not enabled")
     } else {
-        msg.reply(&ctx, "rules bot disabled")?;
-        guild.update(&connection, GuildUpdate::DisableBot)?;
+        task::spawn_blocking(move || {
+            guild.update(&pool.get().unwrap(), GuildUpdate::DisableBot).map_err(|e| format!("{}", e))
+        }).await??;
         Ok(())
     }
 }

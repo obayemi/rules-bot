@@ -237,14 +237,11 @@ impl Guild {
         rule_name: &str,
     ) -> Result<String, String> {
         use crate::schema::rules::dsl::*;
-        Ok(Rule::belonging_to(self)
+        Rule::belonging_to(self)
             .filter(name.eq(rule_name))
-            .load::<Rule>(connection)
-            .map_err(|_| "could not get rules".to_string())?
-            .into_iter()
-            .map(|r| format!("**{}**\n{}\n{}", r.name, r.rule, r.extra))
-            .collect::<Vec<String>>()
-            .join("\n\n"))
+            .get_result::<Rule>(connection)
+            .map_err(|_| format!("unknown rule `{}`", rule_name))
+            .map(|r| format!("**{}**\n{}", r.name, r.rule,))
     }
 
     pub fn get_rules_message(&self, connection: &PgConnection) -> String {

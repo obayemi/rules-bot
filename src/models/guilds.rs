@@ -227,7 +227,7 @@ impl Guild {
             .expect("could not get rules");
         rules
             .into_iter()
-            .map(|r| format!("**{}**\n{}", r.name, r.rule,))
+            .map(|r| r.format_short())
             .collect::<Vec<String>>()
             .join("\n\n")
     }
@@ -241,7 +241,7 @@ impl Guild {
             .filter(name.eq(rule_name))
             .get_result::<Rule>(connection)
             .map_err(|_| format!("unknown rule `{}`", rule_name))
-            .map(|r| format!("**{}**\n{}", r.name, r.rule,))
+            .map(|r| r.format_long())
     }
 
     pub fn get_rules_message(&self, connection: &PgConnection) -> String {

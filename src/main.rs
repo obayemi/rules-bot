@@ -43,6 +43,8 @@ use commands::*;
     //update_message,
     //unbind_message,
     rule,
+    set_rule,
+    drop_rule,
     status,
     //set_rules_channel,
     //set_logs_channel,

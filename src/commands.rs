@@ -13,7 +13,7 @@ use crate::models::{
         // RulesChannelUpdate, RulesContentUpdate,
         RulesMessageUpdate,
     },
-    rules::NewRule,
+    rules::{NewRule, Rule},
 };
 // use log::{error, info};
 use regex::Regex;
@@ -426,6 +426,56 @@ pub async fn rule(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
         });
         m
     }).await?;
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[checks(Moderator)]
+pub async fn set_rule(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = Arc::new(ctx.data.read().await.get::<DbKey>().unwrap().clone());
+    let guild_id = msg.guild_id.unwrap().into();
+    let rule_name = args.single::<String>().map_err(|_| "require rule name and description `set_rule NAME DESCRIPTION`".to_string())?;
+    let rule_description = args.single_quoted::<String>().map_err(|_| "require rule name and description `set_rule NAME DESCRIPTION [EXTRA]`".to_string())?;
+    let rule_extra = args.single_quoted::<String>().unwrap_or_else(|_| "".to_string());
+
+
+    let new_rule = task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        let guild = Guild::from_guild_id(&connection, guild_id).unwrap();
+        let new_rule = NewRule{
+            guild_id: guild.id,
+            name: rule_name, 
+            rule: rule_description,
+            extra: rule_extra
+        };
+        new_rule.upsert(&connection)
+    }).await??;
+    let status_str = new_rule.format_long();
+    msg.channel_id.send_message(&ctx, |m| {
+        m.embed(|e| {
+            e.description(status_str);
+            e
+        });
+        m
+    }).await?;
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[checks(Moderator)]
+pub async fn drop_rule(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let pool = Arc::new(ctx.data.read().await.get::<DbKey>().unwrap().clone());
+    let guild_id = msg.guild_id.unwrap().into();
+    let rule_name = args.single::<String>().map_err(|_| "require rule name".to_string())?;
+
+    task::spawn_blocking(move || {
+        let connection = pool.get().unwrap();
+        let guild = Guild::from_guild_id(&connection, guild_id).unwrap();
+        Rule::drop_rule(&rule_name, guild.id, &connection).map_err(|_| format!("could not delete rule `{}`", rule_name))
+    }).await??;
+    msg.reply(&ctx, format!("rule dropped")).await?;
     Ok(())
 }
 

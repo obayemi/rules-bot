@@ -109,10 +109,10 @@ pub async fn update_message(ctx: &Context, msg: &Message) -> CommandResult {
                 .message(&ctx, message_id).await
                 .map_err(|_| "rules message not found")?;
 
-						let rule_message = task::spawn_blocking(move || {
-              let connection = pool.get().unwrap();
-							guild.get_rules_message(&connection)
-						}).await?;
+            let rule_message = task::spawn_blocking(move || {
+                let connection = pool.get().unwrap();
+                guild.get_rules_message(&connection)
+            }).await?;
 
             channel_id
                 .edit_message(&ctx, message_id, |m| {
@@ -485,7 +485,6 @@ pub async fn drop_rule(ctx: &Context, msg: &Message, mut args: Args) -> CommandR
 //#[display_in_help(false)]
 pub async fn status(ctx: &Context, msg: &Message) -> CommandResult {
     let pool = Arc::new(ctx.data.read().await.get::<DbKey>().unwrap().clone());
-
     let guild_id = msg.guild_id.unwrap().into();
 
     let (guild,message) = task::spawn_blocking(move || {
@@ -671,12 +670,14 @@ pub async fn disable(ctx: &Context, msg: &Message) -> CommandResult {
     }).await??;
 
     if !guild.active {
+        msg.reply(&ctx, "bot already inactive").await?;
         Ok(())
-        //Err("rules are not enabled")
+        //Err("rules are not enabled".to_string()).into()
     } else {
         task::spawn_blocking(move || {
             guild.update(&pool.get().unwrap(), GuildUpdate::DisableBot).map_err(|e| format!("{}", e))
         }).await??;
+        msg.reply(&ctx, "bot disabled").await?;
         Ok(())
     }
 }

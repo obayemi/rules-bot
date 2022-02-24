@@ -1,4 +1,0 @@
-ALTER TABLE guilds
-    ADD COLUMN preface TEXT NOT NULL DEFAULT '',
-    ADD COLUMN postface TEXT NOT NULL DEFAULT '';
-

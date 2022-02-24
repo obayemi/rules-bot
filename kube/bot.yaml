@@ -1,0 +1,44 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  namespace: rules-bot
+  name: rules-bot-secrets
+type: Opaque
+stringData:
+  databaseUrl: $DATABASE_URL
+  discordToken: $DISCORD_TOKEN
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rules-bot-deployment
+  namespace: rules-bot
+  labels:
+    app: rules-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rules-bot
+  template:
+    metadata:
+      labels:
+        app: rules-bot
+    spec:
+      containers:
+      - name: rules-bot
+        image: $IMAGE
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rules-bot-secrets
+              key: databaseUrl
+        - name: DISCORD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: rules-bot-secrets
+              key: discordToken
+        - name: DISCORD_PREFIX
+          value: $DISCORD_PREFIX

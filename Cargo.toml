@@ -1,0 +1,18 @@
+[package]
+name = "rules-bot"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "postgres", "chrono", "macros", "migrate", "uuid", "json", "offline" ] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+# poise = "0.10"
+poise = { git = "https://github.com/kangalioo/poise" }
+serde = "1.0"
+serde_json = "1.0"
+anyhow = "1.0"
+dotenv = "0.15"

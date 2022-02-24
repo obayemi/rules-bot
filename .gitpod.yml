@@ -1,0 +1,20 @@
+github:
+  prebuilds:
+    # enable for the master/default branch (defaults to true)
+    master: true
+    # enable for all branches in this repo (defaults to false)
+    branches: false
+    # enable for pull requests coming from this repo (defaults to true)
+    pullRequests: true
+    # add a check to pull requests (defaults to true)
+    addCheck: true
+    # add a "Review in Gitpod" button as a comment to pull requests (defaults to false)
+    addComment: false
+image:
+  file: .gitpod.dockerfile
+tasks:
+  - init: |
+      cargo build
+      cargo install cargo-watch
+      cargo install sqlx-cli --no-default-features --features rustls,postgres
+    command: cargo watch -x run

@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use poise::serenity_prelude as serenity;
-use poise::serenity_prelude::{ChannelId, Mentionable, MessageBuilder, MessageId, RoleId, Colour,Member, PartialMember};
+use poise::serenity_prelude::{ChannelId, Mentionable, MessageBuilder, MessageId, RoleId, Colour,Member};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::env;
 use std::str::FromStr;
@@ -30,11 +30,13 @@ fn member_details(member: &Member) -> String {
 
 async fn log_event(
     ctx: &serenity::Context,
+    guild_id: serenity::GuildId,
     member: &Member,
     logs_channel_id: Option<i64>,
     event: &str,
     color: Colour,
 ) {
+    info!(member=member.display_name().as_str(), guild_id=guild_id.0, event);
     if let Some(c_id) = logs_channel_id {
         ChannelId(c_id as u64)
             .send_message(ctx, |m| {
@@ -85,6 +87,7 @@ async fn event_listener(
                     member.add_role(&ctx, guild_config.member_role_id.unwrap() as u64).await?;
                     log_event(
                         &ctx,
+                        guild_id,
                         &member,
                         guild_config.log_channel_id,
                         "User accepted the rules",
@@ -92,13 +95,13 @@ async fn event_listener(
                     ).await;
                 }
                 r if r == guild_config.reaction_reject => {
-                    // TODO: remove `reaction_ok` reaction if present
                     info!("  => reject");
                     member.kick(&ctx).await?;
                     add_reaction.delete(&ctx).await?;
                     add_reaction.channel_id.delete_reaction(&ctx, add_reaction.message_id, add_reaction.user_id, serenity::ReactionType::from_str(&guild_config.reaction_ok)?).await?;
                     log_event(
                         &ctx,
+                        guild_id,
                         &member,
                         guild_config.log_channel_id,
                         "User rejected the rules",
@@ -133,9 +136,10 @@ async fn event_listener(
             );
             match removed_reaction.emoji.as_data() {
                 r if r == guild_config.reaction_ok => {
-                    info!("  => ok");
+                    member.remove_role(&ctx, guild_config.member_role_id.unwrap() as u64).await?;
                     log_event(
                         &ctx,
+                        guild_id,
                         &member,
                         guild_config.log_channel_id,
                         "User unaccepted the rules",
@@ -234,7 +238,6 @@ async fn help(
         ctx,
         command.as_deref(),
         poise::builtins::HelpConfiguration {
-            show_context_menu_commands: true,
             ..Default::default()
         },
     )
@@ -279,13 +282,15 @@ pub async fn moderator_check(ctx: Context<'_>) -> Result<bool, Error> {
         return Ok(true);
     }
 
-    let guild_config = sqlx::query!(
+    let guild_config = match sqlx::query!(
         "SELECT admin_role_id FROM guilds WHERE guild_id = $1 AND admin_role_id IS NOT NULL",
         guild_id.0 as i64
     )
     .fetch_optional(&ctx.data().pool)
-    .await?
-    .ok_or_else(|| anyhow!("guild does not have moderators role setup"))?;
+    .await? {
+        Some(config) => config,
+        _ => return Ok(false)
+    };
 
     let admin_role_id = guild_config
         .admin_role_id
@@ -436,43 +441,6 @@ async fn configure(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Set channel where the bot will put its rules message
-#[poise::command(
-    prefix_command,
-    slash_command,
-    rename = "rules_channel",
-    category = "Management",
-    check = "moderator_check"
-)]
-async fn set_rules_chanel(
-    ctx: Context<'_>,
-    #[description = "Message to track"] channel: Option<serenity::Channel>,
-) -> Result<(), Error> {
-    // (if a message was previously tracked, it will remove the tracking,
-    // run `track_message` again to start tracking an old message again)
-    let guild_id = ctx
-        .guild_id()
-        .ok_or_else(|| anyhow!("command can't be run outside a guild"))?;
-    info!(
-        guild_id = guild_id.0,
-        channel_id = channel.as_ref().map(|c| c.id().0),
-        "tracking new rules message"
-    );
-    sqlx::query!(
-        "UPDATE guilds SET (rules_message_id, rules_channel_id) = (NULL, $1) WHERE guild_id = $2",
-        channel.as_ref().map(|c| c.id().0 as i64),
-        guild_id.0 as i64,
-    )
-    .execute(&ctx.data().pool)
-    .await?;
-    if let Some(channel) = channel {
-        ctx.say(format!("rules channel setup in {}\n\n:warning: run `track_message` to track an existing message", channel.mention())).await?;
-    } else {
-        ctx.say("cleared rules channel").await?;
-    }
-    Ok(())
-}
-
 /// register a rule
 #[poise::command(
     prefix_command,
@@ -522,9 +490,8 @@ pub async fn drop_rule(
         ctx.guild_id().ok_or(anyhow!("guild only command"))?.0 as i64,
         name,
     )
-    .fetch_optional(&ctx.data().pool)
-    .await?
-    .ok_or(anyhow!("rule drop failed"))?;
+    .execute(&ctx.data().pool)
+    .await?;
 
     ctx.say("rule dropped").await?;
     Ok(())
@@ -534,7 +501,7 @@ pub async fn drop_rule(
 #[poise::command(
     prefix_command,
     slash_command,
-    rename = "logs_channel",
+    rename = "set_logs_channel",
     category = "Management",
     check = "moderator_check"
 )]
@@ -614,7 +581,7 @@ async fn set_tracked_rules_message(
 #[poise::command(
     prefix_command,
     slash_command,
-    rename = "moderators",
+    rename = "set_moderators",
     category = "Management",
     check = "admin_check"
 )]
@@ -651,7 +618,7 @@ async fn set_moderators(
 #[poise::command(
     prefix_command,
     slash_command,
-    rename = "member_role",
+    rename = "set_member_role",
     category = "Management",
     check = "admin_check"
 )]
@@ -836,25 +803,13 @@ async fn main() {
                 register(),
                 rules(),
                 status(),
-                // should I add the track message function as a context menu or is it just noise since it probably won't be used more than once ?
-                // poise::Command{
-                //     prefix_action: None,
-                //     slash_action: None,
-                //     ..set_tracked_rules_message()
-                // },
-                poise::Command {
-                    subcommands: vec![
-                        set_tracked_rules_message(),
-                        set_moderators(),
-                        set_member_role(),
-                        set_rules_chanel(),
-                        set_logs_chanel(),
-                        set_rule(),
-                        drop_rule(),
-                        send_rule_message(),
-                    ],
-                    ..configure()
-                },
+                set_tracked_rules_message(),
+                set_moderators(),
+                set_member_role(),
+                set_logs_chanel(),
+                set_rule(),
+                drop_rule(),
+                send_rule_message(),
             ],
             on_error: |error| Box::pin(on_error(error)),
             listener: |ctx, event, framework, user_data| {

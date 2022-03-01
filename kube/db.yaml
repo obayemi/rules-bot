@@ -1,0 +1,32 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  namespace: rules-bot
+  name: rules-bot-db-secrets
+type: Opaque
+stringData:
+  postgres-password: $POSTGRES_PASSWORD
+  replication-password: $POSTGRES_REPLICATION_PASSWORD
+---
+apiVersion: kubegres.reactive-tech.io/v1
+kind: Kubegres
+metadata:
+  namespace: rules-bot
+  name: rules-bot-db
+spec:
+   replicas: 2
+   image: postgres:14
+   database:
+      size: 1Gi
+   env:
+      - name: POSTGRES_PASSWORD
+        valueFrom:
+           secretKeyRef:
+              name: rules-bot-db-secrets
+              key: postgres-password
+      - name: POSTGRES_REPLICATION_PASSWORD
+        valueFrom:
+           secretKeyRef:
+              name: rules-bot-db-secrets
+              key: replication-password

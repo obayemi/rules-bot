@@ -1,4 +1,2 @@
 /target
-**/*.rs.bk
-db.sqlite3
 .env

@@ -1,0 +1,386 @@
+{
+  "db": "PostgreSQL",
+  "067193a102f9e5d22b5a1fa53ce87cfee1aaa7a41b40bd59b5ec0d057a8d514d": {
+    "describe": {
+      "columns": [
+        {
+          "name": "reaction_ok",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "member_role_id",
+          "ordinal": 1,
+          "type_info": "Int8"
+        },
+        {
+          "name": "log_channel_id",
+          "ordinal": 2,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false,
+        true,
+        true
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT reaction_ok, member_role_id, log_channel_id FROM guilds WHERE guild_id = $1 AND rules_message_id = $2 AND rules_channel_id = $3 AND member_role_id IS NOT NULL"
+  },
+  "1197f7c514fa881e3a0da51ededb4a056727994b6d075768570e3672891f9e25": {
+    "describe": {
+      "columns": [
+        {
+          "name": "guild_id",
+          "ordinal": 0,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Varchar",
+          "Text",
+          "Text"
+        ]
+      }
+    },
+    "query": "INSERT INTO rules (guild_id, name, rule, extra) VALUES ($1, $2, $3, $4)\n            ON CONFLICT (guild_id, name) DO UPDATE SET rule = EXCLUDED.rule, extra = EXCLUDED.extra RETURNING guild_id"
+  },
+  "274ba02dd7089da09f0c9173c10b45eb605dd471c7dba70372521af335021086": {
+    "describe": {
+      "columns": [
+        {
+          "name": "reaction_ok",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "reaction_reject",
+          "ordinal": 1,
+          "type_info": "Varchar"
+        }
+      ],
+      "nullable": [
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT reaction_ok, reaction_reject FROM guilds WHERE guild_id = $1"
+  },
+  "2c30d1bcb5eb9ba64c7c642c3251a203a351a3490a970bd8d25ade28d1d24116": {
+    "describe": {
+      "columns": [
+        {
+          "name": "rules_message_id",
+          "ordinal": 0,
+          "type_info": "Int8"
+        },
+        {
+          "name": "rules_channel_id",
+          "ordinal": 1,
+          "type_info": "Int8"
+        },
+        {
+          "name": "admin_role_id",
+          "ordinal": 2,
+          "type_info": "Int8"
+        },
+        {
+          "name": "log_channel_id",
+          "ordinal": 3,
+          "type_info": "Int8"
+        },
+        {
+          "name": "reaction_ok",
+          "ordinal": 4,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "reaction_reject",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "member_role_id",
+          "ordinal": 6,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        true
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT rules_message_id, rules_channel_id, admin_role_id, log_channel_id, reaction_ok, reaction_reject, member_role_id FROM guilds WHERE guild_id = $1"
+  },
+  "5ac1196bee1876bbdcd70a29f2f9e99982e665a935080b7532fc9089e7c5adc6": {
+    "describe": {
+      "columns": [
+        {
+          "name": "name",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "rule",
+          "ordinal": 1,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT name, rule FROM rules WHERE guild_id = $1"
+  },
+  "6e7d9bc37c48d6423957363620dd1501aa0051b48f228a36d161d5ba7c68b08a": {
+    "describe": {
+      "columns": [
+        {
+          "name": "admin_role_id",
+          "ordinal": 0,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        true
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT admin_role_id FROM guilds WHERE guild_id = $1 AND admin_role_id IS NOT NULL"
+  },
+  "7a9e83f4e5d70170161159ace8a57d49f6f0a74a69032b6a2cdd57a5271eceba": {
+    "describe": {
+      "columns": [
+        {
+          "name": "name",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "rule",
+          "ordinal": 1,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Text"
+        ]
+      }
+    },
+    "query": "SELECT name, rule FROM rules WHERE guild_id = $1 AND name LIKE $2"
+  },
+  "80674e73f6f8464917aa79e03f2d27d04d9e8b82bb9c6bddd61dc8fb365440f4": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "UPDATE guilds SET (rules_message_id, rules_channel_id) = ($1, $2) WHERE guild_id = $3"
+  },
+  "8b5b74442db4d478443a5c2a811d12e1aed6496ecfb7f67da767c479a105d274": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Text"
+        ]
+      }
+    },
+    "query": "DELETE FROM rules WHERE guild_id = $1 AND name = $2"
+  },
+  "a8b2e35fba3649ff2437d7bff8cea887f8298a4f6f6dbd8185c929dd5beaabd0": {
+    "describe": {
+      "columns": [
+        {
+          "name": "reaction_ok",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "reaction_reject",
+          "ordinal": 1,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "member_role_id",
+          "ordinal": 2,
+          "type_info": "Int8"
+        },
+        {
+          "name": "log_channel_id",
+          "ordinal": 3,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT reaction_ok, reaction_reject, member_role_id, log_channel_id FROM guilds WHERE guild_id = $1 AND rules_message_id = $2 AND rules_channel_id = $3 AND member_role_id IS NOT NULL"
+  },
+  "bb16c063cc7b92a301df303348d98cf0af44416dbda6b43aad76c049dd587020": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "UPDATE guilds SET admin_role_id = $1 WHERE guild_id = $2"
+  },
+  "c582ba49e685230ff575ffeb988d5e400b32202ccdad7f1394ae0a4f534bebd4": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      }
+    },
+    "query": "INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING"
+  },
+  "d16ba31635bb221d32582ebd07a49e7825d028552ae7591099a701008d15a1d5": {
+    "describe": {
+      "columns": [
+        {
+          "name": "name",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "rule",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "extra",
+          "ordinal": 2,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Text"
+        ]
+      }
+    },
+    "query": "SELECT name, rule, extra FROM rules WHERE guild_id = $1 AND name = $2"
+  },
+  "e618b489ce4d2523ec52fcae62dd581232892f6c8196520b4dc267b99c8425fa": {
+    "describe": {
+      "columns": [
+        {
+          "name": "rule",
+          "ordinal": 0,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT rule FROM rules WHERE guild_id = $1"
+  },
+  "ed8c0d8660c1660580a5e0b638de874d91860732f40cddb942310d6e74aa5f70": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "UPDATE guilds SET log_channel_id = $1 WHERE guild_id = $2"
+  },
+  "ef1547a3d07cebff7be56fa261ff8bc7fd6609058bab59e7cb52ad7d6e24df55": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "UPDATE guilds SET member_role_id = $1 WHERE guild_id = $2"
+  }
+}
